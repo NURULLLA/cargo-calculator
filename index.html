@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SkyGuard | Cargo Optimizer</title>
+    <link rel="stylesheet" href="styles.css?v=2">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+
+<body class="dark-theme">
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo">
+                <i class="fas fa-plane-departure"></i>
+                <span>SkyGuard</span>
+            </div>
+            <nav>
+                <button class="nav-item active" data-tab="input-tab">
+                    <i class="fas fa-boxes-stacked"></i> Cargo Input
+                </button>
+                <button class="nav-item" data-tab="main-deck-tab">
+                    <i class="fas fa-layer-group"></i> Main Deck
+                </button>
+                <button class="nav-item" data-tab="lower-deck-tab">
+                    <i class="fas fa-database"></i> Lower Deck
+                </button>
+                <button class="nav-item" data-tab="summary-tab">
+                    <i class="fas fa-chart-pie"></i> Load Summary
+                </button>
+            </nav>
+            <div class="sidebar-footer">
+                <p>v2.0 Beta</p>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="content">
+            <!-- Header -->
+            <header>
+                <div class="header-info">
+                    <h1 id="tab-title">Cargo Inventory</h1>
+                    <p id="tab-subtitle">Define batch dimensions and quantities</p>
+                </div>
+                <div class="header-actions">
+                    <select id="config-select" class="btn-secondary" title="Select Aircraft Configuration">
+                        <option value="PAG">B757-200 (15x PAG)</option>
+                        <option value="PMC">B757-200 (13x PMC)</option>
+                    </select>
+                    <button id="btn-calculate" class="btn-primary">
+                        <i class="fas fa-calculator"></i> Calculate Load
+                    </button>
+                </div>
+            </header>
+
+            <!-- Tabs Section -->
+            <div class="tab-panels">
+                <!-- Input Tab -->
+                <section id="input-tab" class="tab-panel active">
+                    <div class="card item-form">
+                        <h3>Add New Cargo Batch</h3>
+                        <div class="form-grid">
+                            <div class="input-group">
+                                <label>Batch Name</label>
+                                <input type="text" id="item-name" placeholder="e.g. Spare Parts">
+                            </div>
+                            <div class="input-group">
+                                <label>L (cm)</label>
+                                <input type="number" id="item-l" value="120" title="Length in cm">
+                            </div>
+                            <div class="input-group">
+                                <label>W (cm)</label>
+                                <input type="number" id="item-w" value="100" title="Width in cm">
+                            </div>
+                            <div class="input-group">
+                                <label>H (cm)</label>
+                                <input type="number" id="item-h" value="100" title="Height in cm">
+                            </div>
+                            <div class="input-group">
+                                <label>Wt (kg)</label>
+                                <input type="number" id="item-wt" value="500" title="Weight in kg">
+                            </div>
+                            <div class="input-group">
+                                <label>Qty</label>
+                                <input type="number" id="item-qty" value="10" title="Quantity">
+                            </div>
+                            <div class="input-group checkbox">
+                                <label><input type="checkbox" id="item-tip"> Allow Tipping</label>
+                            </div>
+                            <div class="input-group checkbox">
+                                <label><input type="checkbox" id="item-no-stack"> Do Not Stack / Top Only</label>
+                            </div>
+                            <button id="btn-add-item" class="btn-success">Add to List</button>
+                        </div>
+                    </div>
+
+                    <div class="card inventory-card">
+                        <h3>Current Inventory</h3>
+                        <div class="table-container">
+                            <table id="inventory-table">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Dimensions</th>
+                                        <th>Weight</th>
+                                        <th>Qty</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Dynamic content -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Visualization Tabs -->
+                <section id="main-deck-tab" class="tab-panel">
+                    <div class="viz-container" id="main-deck-viz">
+                        <div class="viz-overlay">
+                            <div class="deck-stats">
+                                <div class="stat-item">Payload: <span id="md-payload">0</span> kg</div>
+                                <div class="stat-item">Positions: <span id="md-pos">0/0</span></div>
+                            </div>
+                        </div>
+                        <div id="main-deck-3d" class="three-canvas"></div>
+                    </div>
+                </section>
+
+                <section id="lower-deck-tab" class="tab-panel">
+                    <div class="viz-container" id="lower-deck-viz">
+                        <div class="viz-overlay">
+                            <div class="deck-stats">
+                                <div class="stat-item">Bulk Weight: <span id="ld-payload">0</span> kg</div>
+                            </div>
+                        </div>
+                        <div id="lower-deck-3d" class="three-canvas"></div>
+                    </div>
+                </section>
+
+                <!-- Summary Tab -->
+                <section id="summary-tab" class="tab-panel">
+                    <div class="summary-grid">
+                        <div class="card highlight-card">
+                            <h4>Overall Weight</h4>
+                            <div class="big-number" id="total-weight">0 kg</div>
+                        </div>
+                        <div class="card">
+                            <h4>Main Deck Total</h4>
+                            <div class="big-number" id="md-total-boxes">0</div>
+                            <p>Boxes placed on pallets</p>
+                        </div>
+                        <div class="card">
+                            <h4>Lower Deck Total</h4>
+                            <div class="big-number" id="ld-total-boxes">0</div>
+                            <p>Boxes placed in holds</p>
+                        </div>
+                        <div class="card error-card" id="leftover-card">
+                            <h4>Left Behind</h4>
+                            <div class="big-number" id="total-leftovers">0</div>
+                            <p>Items could not fit within limits.</p>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3>Breakdown by Position</h3>
+                        <div id="position-report" class="report-list">
+                            <!-- Dynamic report -->
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Notification system -->
+    <div id="toast-container"></div>
+
+    <script type="module" src="app.js?v=2"></script>
+</body>
+
+</html>

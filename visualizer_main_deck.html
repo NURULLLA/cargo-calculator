@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Sky Guard Main Deck Visualizer</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: sans-serif;
+            background: #222;
+            color: white;
+        }
+
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            pointer-events: none;
+            text-shadow: 1px 1px 2px black;
+        }
+
+        #legend {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px;
+            border-radius: 8px;
+        }
+
+        .key-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+
+        .color-box {
+            width: 15px;
+            height: 15px;
+            margin-right: 8px;
+            border: 1px solid white;
+        }
+    </style>
+    <!-- Import Three.js via ES Modules -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+
+<body>
+    <div id="info">
+        <h1>Main Deck Cargo Plan</h1>
+        <p>Positions: 1-15 (PAG) or 1-13 (PMC)</p>
+    </div>
+    <div id="legend">
+        <div class="key-item">
+            <div class="color-box" style="background:rgba(255,255,255,0.1); border-color:#888;"></div>Fuselage Hull
+            (340cm Wide)
+        </div>
+        <div class="key-item">
+            <div class="color-box" style="background:#4444ff; opacity: 0.5;"></div>Position Marker
+        </div>
+        <div class="key-item">
+            <div class="color-box" style="background:#ffaa00;"></div>Loaded Pallet
+        </div>
+    </div>
+
+    <!-- DATA LOADER -->
+    <script src="cargo_data.js"></script>
+    <script>
+        // Fallback if no data
+        if (!window.CARGO_DATA) {
+            window.CARGO_DATA = {
+                main_deck: [], // Array of pallets
+                lower_deck: []
+            };
+            console.warn("No cargo_data.js found. Run the calculator first.");
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- MAIN DECK CONFIG ---
+        const FUSELAGE_WIDTH = 340;
+        const FUSELAGE_HEIGHT = 218;
+        const DECK_LENGTH = 3500; // ~35 meters
+
+        // --- SETUP SCENE ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a1a);
+        scene.fog = new THREE.Fog(0x1a1a1a, 2000, 6000);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 10000);
+        camera.position.set(-1000, 1500, 3000);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        const ambLight = new THREE.AmbientLight(0xffffff, 0.7);
+        scene.add(ambLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.5);
+        dirLight.position.set(500, 1000, 500);
+        scene.add(dirLight);
+
+        const gridHelper = new THREE.GridHelper(5000, 50, 0x444444, 0x333333);
+        gridHelper.position.y = -10;
+        scene.add(gridHelper);
+
+        // --- HULL GEOMETRY FUNCTION ---
+        function createMainDeckHull(length, width, height) {
+            const shape = new THREE.Shape();
+            // Arch shape
+            shape.moveTo(-width / 2, 0);
+            shape.lineTo(width / 2, 0); // Floor
+
+            // Right Wall
+            shape.bezierCurveTo(width / 2, height * 0.5, width * 0.4, height, 0, height);
+            // Left Wall
+            shape.bezierCurveTo(-width * 0.4, height, -width / 2, height * 0.5, -width / 2, 0);
+
+            const extrudeSettings = { steps: 5, depth: length, bevelEnabled: false };
+            const geom = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+            geom.center();
+            return geom;
+        }
+
+        // Build Hull
+        const hullGeom = createMainDeckHull(DECK_LENGTH, FUSELAGE_WIDTH, FUSELAGE_HEIGHT);
+        hullGeom.rotateY(Math.PI / 2);
+        const hullMat = new THREE.MeshPhongMaterial({
+            color: 0x88aabb, transparent: true, opacity: 0.1,
+            side: THREE.DoubleSide, shininess: 100, wireframe: false
+        });
+        const hullMesh = new THREE.Mesh(hullGeom, hullMat);
+        hullMesh.position.y = FUSELAGE_HEIGHT / 2;
+        scene.add(hullMesh);
+
+        const hullWire = new THREE.LineSegments(new THREE.EdgesGeometry(hullGeom), new THREE.LineBasicMaterial({ color: 0x88aabb, opacity: 0.3, transparent: true }));
+        hullWire.position.y = FUSELAGE_HEIGHT / 2;
+        scene.add(hullWire);
+
+        // --- DRAW POSITIONS AND CARGO ---
+        const posGroup = new THREE.Group();
+        const pallets = window.CARGO_DATA.main_deck || [];
+
+        // Define Pallet Configs manually for viz (PAG vs PMC dims)
+        // PAG: 317x223 flat? 
+        // We'll layout 15 positions assuming PAG spacing.
+        // Start X?
+        let startX = -DECK_LENGTH / 2 + 200;
+
+        // We iterate 1-15 (or however many pallets exist)
+        // If data has 5 pallets, we assume they are Pos 1-5?
+        // Or we just draw the filled ones.
+        // Let's draw 15 fixed slots first, then fill them if ID matches.
+
+        const MAX_POS = 15;
+        const P_LEN = 223;
+        const P_WID = 317;
+
+        for (let i = 1; i <= MAX_POS; i++) {
+            // Find pallet data
+            const pData = pallets.find(p => p.id === i);
+
+            // Base Marker
+            const geom = new THREE.PlaneGeometry(P_LEN, P_WID);
+            const mat = new THREE.MeshBasicMaterial({
+                color: pData ? 0x00aa00 : 0x4444ff,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: pData ? 0.5 : 0.1
+            });
+            const mesh = new THREE.Mesh(geom, mat);
+            mesh.rotation.x = -Math.PI / 2; // Flat on floor
+
+            mesh.position.set(startX + (P_LEN / 2), 2, 0);
+
+            // Outline
+            const edge = new THREE.LineSegments(new THREE.EdgesGeometry(geom), new THREE.LineBasicMaterial({ color: 0x6666ff }));
+            mesh.add(edge);
+
+            // Label
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = 128; canvas.height = 64;
+            ctx.fillStyle = "white";
+            ctx.font = "40px Arial";
+            ctx.textAlign = "center";
+            ctx.fillText(`Pos ${i}`, 64, 40);
+            if (pData) {
+                ctx.font = "20px Arial";
+                ctx.fillStyle = "#aaffaa";
+                ctx.fillText(`${pData.weight}kg`, 64, 60);
+            }
+            const tex = new THREE.CanvasTexture(canvas);
+            const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex }));
+            sprite.position.set(0, 50, 0);
+            sprite.scale.set(100, 50, 1);
+            mesh.add(sprite);
+
+            posGroup.add(mesh);
+
+            // --- DRAW CARGO LAYERS ---
+            if (pData && pData.layers) {
+                pData.layers.forEach(l => {
+                    // Draw Main Block
+                    if (l.meta && l.meta.main) {
+                        const m = l.meta.main;
+                        // Orient: STANDARD means dim_long along Pallet Length (which is Fuselage Length for PAG?)
+                        // PAG: Length=223 along Fuselage. Width=317 Cross.
+                        // Standard: Item L along Pallet L (Fuselage). Item W along Pallet W (Cross).
+                        // If "A" (Length along Width) means Rotated?
+                        // Let's assume Box is 120x100.
+                        // We need the box dims. Since we don't have them explicitly, rely on grid count.
+                        // Grid R x C.
+                        // Space Used: R * dim_long, C * dim_cross. Wait.
+                        // Let's simulate blocks.
+                        // We draw a big block representing the layer for simplicity (or individual boxes if possible).
+                        // Layer Height: l.height.
+
+                        // Let's draw ONE block per metadata zone (Main, Side).
+
+                        // Main Block Size:
+                        // We know the Pallet dims. Use "unused_width" to guess used width?
+                        // Or just assume full if full?
+                        // Let's make a Green Block representing the volume.
+
+                        // Height
+                        const h = l.height;
+                        const z = l.z_start + h / 2;
+
+                        // Main Block
+                        const mainGeo = new THREE.BoxGeometry(P_LEN * 0.8, h, P_WID * 0.8); // Approximated
+                        const mainMat = new THREE.MeshLambertMaterial({ color: 0xffaa00 });
+                        const mainMesh = new THREE.Mesh(mainGeo, mainMat);
+                        // Position: Center of pallet, up Z.
+                        // Relative to Pallet Center?
+                        mainMesh.position.set(mesh.position.x, 2 + z, mesh.position.z);
+
+                        // Add wire
+                        const wire = new THREE.LineSegments(new THREE.EdgesGeometry(mainGeo), new THREE.LineBasicMaterial({ color: 0x553300 }));
+                        mainMesh.add(wire);
+
+                        scene.add(mainMesh);
+                    }
+                });
+            }
+
+            startX += P_LEN + 10; // Gap
+        }
+
+        scene.add(posGroup);
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+
+</html>
