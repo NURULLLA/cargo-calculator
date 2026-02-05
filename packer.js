@@ -230,7 +230,61 @@ const Packer = {
             return b.volumeM3 - a.volumeM3;
         });
 
-        // --- STEP 1: PACK LOWER DECK FIRST ---
+        // --- STEP 1: PACK MAIN DECK PALLETS ---
+        let pallets = [];
+        for (let i = 1; i <= config.count; i++) {
+            let p = new Pallet(i, config);
+            while (true) {
+                if (workingItems.every(x => x.count === 0)) break;
+                let bestLayer = null;
+                let itemToTake = null;
+
+                for (let item of workingItems) {
+                    if (item.count <= 0) continue;
+                    if (!Packer.fitsThroughDoor(item, CONFIG.DOOR_MAIN)) {
+                        // console.log(`Packer: Item ${item.name} failed main door check`);
+                        continue;
+                    }
+                    for (let variant of item.getVariants()) {
+                        let res = Packer.calculateLayer(p, variant);
+                        if (res && (!bestLayer || res.count > bestLayer.count)) {
+                            bestLayer = res;
+                            itemToTake = item;
+                        }
+                    }
+                }
+                if (!bestLayer) break;
+                let toTake = Math.min(bestLayer.count, itemToTake.count);
+                if (p.remainingWeight() < toTake * bestLayer.weight) {
+                    toTake = Math.floor(p.remainingWeight() / itemToTake.weight); // Use itemToTake.weight or bestLayer.weight? BestLayer weight is same as item weight.
+                }
+                if (toTake <= 0) break;
+
+                p.layers.push({
+                    box_name: bestLayer.name,
+                    count: toTake,
+                    height: bestLayer.height,
+                    z_start: p.currentHeight,
+                    z_end: p.currentHeight + bestLayer.height,
+                    meta: bestLayer.meta,
+                    orient_type: bestLayer.orientType,
+                    dim_cross: bestLayer.dim_cross,
+                    dim_long: bestLayer.dim_long
+                });
+                p.currentWeight += toTake * bestLayer.weight;
+                p.currentHeight += bestLayer.height;
+                itemToTake.count -= toTake;
+
+                if (itemToTake.noStack) {
+                    // Close the pallet. This layer is the top layer.
+                    // We artificially set height to max to prevent further packing
+                    p.currentHeight = p.config.max_height;
+                }
+            }
+            pallets.push(p);
+        }
+
+        // --- STEP 2: PACK LOWER DECK SECOND ---
         let lowerDeckResults = [];
         for (let hold of CONFIG.LOWER_DECK) {
             let holdRes = { name: hold.name, current_weight: 0, compartments: [] };
@@ -325,60 +379,6 @@ const Packer = {
                 holdRes.compartments.push(cData);
             }
             lowerDeckResults.push(holdRes);
-        }
-
-        // --- STEP 2: PACK MAIN DECK PALLETS ---
-        let pallets = [];
-        for (let i = 1; i <= config.count; i++) {
-            let p = new Pallet(i, config);
-            while (true) {
-                if (workingItems.every(x => x.count === 0)) break;
-                let bestLayer = null;
-                let itemToTake = null;
-
-                for (let item of workingItems) {
-                    if (item.count <= 0) continue;
-                    if (!Packer.fitsThroughDoor(item, CONFIG.DOOR_MAIN)) {
-                        // console.log(`Packer: Item ${item.name} failed main door check`);
-                        continue;
-                    }
-                    for (let variant of item.getVariants()) {
-                        let res = Packer.calculateLayer(p, variant);
-                        if (res && (!bestLayer || res.count > bestLayer.count)) {
-                            bestLayer = res;
-                            itemToTake = item;
-                        }
-                    }
-                }
-                if (!bestLayer) break;
-                let toTake = Math.min(bestLayer.count, itemToTake.count);
-                if (p.remainingWeight() < toTake * bestLayer.weight) {
-                    toTake = Math.floor(p.remainingWeight() / bestLayer.weight);
-                }
-                if (toTake <= 0) break;
-
-                p.layers.push({
-                    box_name: bestLayer.name,
-                    count: toTake,
-                    height: bestLayer.height,
-                    z_start: p.currentHeight,
-                    z_end: p.currentHeight + bestLayer.height,
-                    meta: bestLayer.meta,
-                    orient_type: bestLayer.orientType,
-                    dim_cross: bestLayer.dim_cross,
-                    dim_long: bestLayer.dim_long
-                });
-                p.currentWeight += toTake * bestLayer.weight;
-                p.currentHeight += bestLayer.height;
-                itemToTake.count -= toTake;
-
-                if (itemToTake.noStack) {
-                    // Close the pallet. This layer is the top layer.
-                    // We artificially set height to max to prevent further packing
-                    p.currentHeight = p.config.max_height;
-                }
-            }
-            pallets.push(p);
         }
 
         return { pallets, lowerDeck: lowerDeckResults, leftovers: workingItems.filter(i => i.count > 0) };
