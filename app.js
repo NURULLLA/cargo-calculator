@@ -69,17 +69,30 @@ class CargoApp {
         const qty = parseInt(document.getElementById('item-qty').value);
         const tip = document.getElementById('item-tip').checked;
         const noStack = document.getElementById('item-no-stack').checked;
+        const priority = document.getElementById('item-priority').checked;
 
         if (isNaN(l) || isNaN(w) || isNaN(h) || isNaN(wt) || isNaN(qty)) {
             alert("Please enter valid numbers");
             return;
         }
 
-        this.cargo.push({ id: Date.now(), name, length: l, width: w, height: h, weight: wt, count: qty, allowTipping: tip, noStack });
+        this.cargo.push({
+            id: Date.now(),
+            name,
+            length: l,
+            width: w,
+            height: h,
+            weight: wt,
+            count: qty,
+            allowTipping: tip,
+            noStack,
+            priority
+        });
         this.renderInventory();
 
         // Reset form
         document.getElementById('item-name').value = '';
+        document.getElementById('item-priority').checked = false;
     }
 
     removeCargoItem(id) {
@@ -93,10 +106,12 @@ class CargoApp {
 
         this.cargo.forEach(item => {
             const tr = document.createElement('tr');
+            const totalWt = item.count * item.weight;
             tr.innerHTML = `
-                <td>${item.name}</td>
+                <td>${item.priority ? '<i class="fas fa-star" style="color:#fbbf24;" title="Priority"></i> ' : ''}${item.name}</td>
                 <td>${item.length}x${item.width}x${item.height}</td>
                 <td>${item.weight} kg</td>
+                <td style="font-weight:bold; color:var(--accent);">${totalWt.toLocaleString()} kg</td>
                 <td>${item.count} ${item.noStack ? '<span class="badge" style="background:#ef4444; color:white; padding:2px 4px; border-radius:4px; font-size:0.7em;">Top Only</span>' : ''}</td>
                 <td>
                     <button class="btn-danger" data-id="${item.id}">
@@ -119,20 +134,13 @@ class CargoApp {
             this.results.lowerDeck.reduce((acc, h) => acc + h.current_weight, 0);
 
         // GROSS Weight (Net + Tare) & Volume
-        let totalGross = this.results.lowerDeck.reduce((acc, h) => acc + h.current_weight, 0); // Holds have no tare in this logic? Assume 0 for holds.
+        let totalGross = this.results.lowerDeck.reduce((acc, h) => acc + h.current_weight, 0);
         let totalVolume = 0;
 
         // Pallets Gross = Net + Tare
         this.results.pallets.forEach(p => {
-            // If used (weight > 0), add tare
             if (p.currentWeight > 0) totalGross += (p.currentWeight + p.tareWeight);
-
-            // Volume
             p.layers.forEach(l => {
-                // volume = l.count * (box volume)
-                // We don't have box volume directly in layer, but we can approximate:
-                // l.dim_cross * l.dim_long * l.height * l.count
-                // NOTE: dimensions are cm. -> / 1,000,000 for m3
                 if (l.dim_cross && l.dim_long && l.height && l.count) {
                     totalVolume += (l.dim_cross * l.dim_long * l.height * l.count) / 1000000;
                 }
@@ -175,8 +183,20 @@ class CargoApp {
         document.getElementById('total-leftovers').textContent = leftoversCount;
 
         const leftoverCard = document.getElementById('leftover-card');
-        if (leftoversCount > 0) leftoverCard.classList.add('error-card');
-        else leftoverCard.classList.remove('error-card');
+        const leftoverList = document.getElementById('leftover-list');
+        leftoverList.innerHTML = '';
+
+        if (leftoversCount > 0) {
+            leftoverCard.classList.add('error-card');
+            this.results.leftovers.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'leftover-item';
+                div.innerHTML = `<span>${item.name}</span> <span>${item.count} items</span>`;
+                leftoverList.appendChild(div);
+            });
+        } else {
+            leftoverCard.classList.remove('error-card');
+        }
 
         // Render Report
         this.renderReport();

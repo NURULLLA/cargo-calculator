@@ -100,6 +100,10 @@
                             <div class="input-group checkbox">
                                 <label><input type="checkbox" id="item-no-stack"> Do Not Stack / Top Only</label>
                             </div>
+                            <div class="input-group checkbox">
+                                <label><input type="checkbox" id="item-priority"> <i class="fas fa-star"
+                                        style="color:#fbbf24;"></i> High Priority</label>
+                            </div>
                             <button id="btn-add-item" class="btn-success">Add to List</button>
                         </div>
                     </div>
@@ -113,6 +117,7 @@
                                         <th>Name</th>
                                         <th>Dimensions</th>
                                         <th>Weight</th>
+                                        <th>Total Wt</th>
                                         <th>Qty</th>
                                         <th>Actions</th>
                                     </tr>
@@ -170,6 +175,7 @@
                             <h4>Left Behind</h4>
                             <div class="big-number" id="total-leftovers">0</div>
                             <p>Items could not fit within limits.</p>
+                            <div id="leftover-list" class="leftover-details"></div>
                         </div>
                     </div>
 

@@ -220,13 +220,25 @@ const Packer = {
 
     packAircraft: (configCode, cargoItems) => {
         const config = CONFIG.PALLET_OPTIONS[configCode];
-        let workingItems = cargoItems.map(i => new CargoItem(i.id, i.name, i.length, i.width, i.height, i.weight, i.count, i.allowTipping, i.noStack));
 
-        // Sort: Regular items first (by volume), then No-Stack items (by volume)
-        // This ensures No-Stack items are packed LAST (on top), acting as lids.
+        // --- PRE-PROCESS: SORT BY PRIORITY THEN FUSELAGE OPTIMIZATION ---
+        // 1. Map to CargoItem objects
+        // 2. Sort: High Priority (true) > Normal Priority (false)
+        // 3. Within same priority: No-Stack items last, then by volume descending
+        let workingItems = cargoItems.map(i => {
+            const item = new CargoItem(i.id, i.name, i.length, i.width, i.height, i.weight, i.count, i.allowTipping, i.noStack);
+            item.priority = i.priority || false;
+            return item;
+        });
+
         workingItems.sort((a, b) => {
-            if (a.noStack && !b.noStack) return 1;
-            if (!a.noStack && b.noStack) return -1;
+            // Priority first (true comes before false)
+            if (a.priority !== b.priority) return a.priority ? -1 : 1;
+
+            // Then No-Stack (lids) last
+            if (a.noStack !== b.noStack) return a.noStack ? 1 : -1;
+
+            // Then volume descending for better packing
             return b.volumeM3 - a.volumeM3;
         });
 
@@ -242,7 +254,6 @@ const Packer = {
                 for (let item of workingItems) {
                     if (item.count <= 0) continue;
                     if (!Packer.fitsThroughDoor(item, CONFIG.DOOR_MAIN)) {
-                        // console.log(`Packer: Item ${item.name} failed main door check`);
                         continue;
                     }
                     for (let variant of item.getVariants()) {
@@ -256,7 +267,7 @@ const Packer = {
                 if (!bestLayer) break;
                 let toTake = Math.min(bestLayer.count, itemToTake.count);
                 if (p.remainingWeight() < toTake * bestLayer.weight) {
-                    toTake = Math.floor(p.remainingWeight() / itemToTake.weight); // Use itemToTake.weight or bestLayer.weight? BestLayer weight is same as item weight.
+                    toTake = Math.floor(p.remainingWeight() / itemToTake.weight);
                 }
                 if (toTake <= 0) break;
 
