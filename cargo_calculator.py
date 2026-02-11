@@ -138,9 +138,9 @@ class Pallet:
         is_last_pmc = (c['code'] == 'PMC' and self.id == 13)
         
         if is_last_pag:
-            base *= 0.88 # -12% roughly
+            base *= 0.93 # ~7% tail narrowing
         elif is_last_pmc:
-            base *= 0.90 # -10% roughly
+            base *= 0.95 # ~5% tail narrowing
             
         return base
 
@@ -304,7 +304,6 @@ class Packer:
                         if v['h'] > c_hgt: continue
                         
                         # --- 1. Calculate Length Limit determined by HEIGHT ---
-                        # Using Power Curve (convex) for ceiling
                         len_limit_h = c_len
                         if c_hgt > c_min_hgt:
                              if v['h'] <= c_min_hgt:
@@ -312,264 +311,77 @@ class Packer:
                              elif v['h'] >= c_hgt:
                                  len_limit_h = 0
                              else:
-                                 # Power Curve Logic: h(x) = H_max - (H_max - H_min) * (x / L)^Power
                                  POWER_H = 3.0
                                  ratio_h = (c_hgt - v['h']) / (c_hgt - c_min_hgt)
                                  ratio_h = max(0.0, min(1.0, ratio_h))
                                  len_limit_h = int(c_len * (ratio_h ** (1/POWER_H)))
                         
                         # --- 2. Calculate Length Limit determined by WIDTH ---
-                        # Linear Taper found too restrictive (Count 3). User verified 5 boxes fit.
-                        # This implies the floor stays wide (120cm) then tapers late.
-                        # Using Power Curve for Width too.
-                        # Prefer Compartment-level config, fallback to Hold-level
                         c_wid_start = comp.get('floor_width_cm', hold_data.get('floor_width_cm', 120))
                         c_wid_end = comp.get('min_floor_width_cm', hold_data.get('min_floor_width_cm', c_wid_start))
 
                         def get_len_limit_by_width(w_item, w_start, w_end, L_total):
                             if w_item <= w_end: return L_total
-                            if w_item > w_start + 0.1: return 0 # Tolerance
+                            if w_item > w_start + 0.1: return 0
                             if w_start == w_end: return 0
-                            
-                            # w(x) = w_start - (w_start - w_end) * (x / L)^P
-                            # Solving for x:
-                            # (x/L)^P = (w_start - w_item) / (w_start - w_end)
-                            # x = L * [ratio]^(1/P)
-                            
-                            POWER_W = 4.0 # Higher power = stays wide longer (Rectangular-ish)
-                            # Add tolerance to w_start in ratio calculation to allow exact fit at x=0+
+                            POWER_W = 4.0
                             ratio_w = ((w_start + 0.1) - w_item) / (w_start - w_end)
                             ratio_w = max(0.0, min(1.0, ratio_w))
-                            
                             return int(L_total * (ratio_w ** (1/POWER_W)))
 
-                        # ORIENTATION A: Item L along Comp Length, Item S along Comp Width (Using smallest available dim for width)
-                        # We use v['w'] as the "width on floor".
-                        # If orienting 120x100 box:
-                        # Variant 1: l=120, w=100. Width on floor is 100.
-                        # Variant 2: l=100, w=120. Width on floor is 120.
-                        
-                        # Check Orient A (current v)
+                        # Orient A
                         len_limit_w_A = get_len_limit_by_width(v['w'], c_wid_start, c_wid_end, c_len)
                         eff_len_A = min(len_limit_h, len_limit_w_A)
-                        
                         count_A = 0
                         fit_l_A = eff_len_A // v['l']
                         if fit_l_A > 0 and c_wid_start >= v['w']:
                             count_A = fit_l_A * (c_hgt // v['h'])
                             
-                        # Check Orient B (swapped L/W on floor)
-                        # Actually variants list includes swapped L/W if tipping allowed?
-                        # If tipping=False, we only have one L/W/H set per orientation?
-                        # CargoItem.get_variants() returns all valid rotations.
-                        # So we just process 'v' as one specific orientation.
-                        # BUT v['l'] and v['w'] are just dimensions. 
-                        # We can always rotate 90 deg on the Floor (Swap L/W).
-                        # unless allow_rotation is False? (usually always True for Z-axis rotation)
-                        
-                        # Let's verify swap within this 'v' (keeping H fixed)
+                        # Orient B (swap L/W on floor, keeping H)
                         len_limit_w_B = get_len_limit_by_width(v['l'], c_wid_start, c_wid_end, c_len)
                         eff_len_B = min(len_limit_h, len_limit_w_B)
-                        
                         count_B = 0
                         fit_w_B = eff_len_B // v['w']
                         if fit_w_B > 0 and c_wid_start >= v['l']:
                             count_B = fit_w_B * (c_hgt // v['h'])
                             
-                        valid_geo_counts.append(max(count_A, count_B))
+                        variant_geo = max(count_A, count_B)
+                        
+                        # --- OBSTACLE CHECK (per variant) ---
+                        # Apply deduction for THIS specific variant height
+                        if 'obstacles' in comp and variant_geo > 0:
+                            for obs in comp['obstacles']:
+                                h_clearance = c_hgt - obs['h']
+                                
+                                # Check if THIS variant's height collides with obstacle
+                                if v['h'] > h_clearance:
+                                    c_floor_w = hold_data.get('floor_width_cm', 120)
+                                    remaining_width_at_obs = c_floor_w - obs['w']
+                                    
+                                    # Use smallest floor dim for passage check
+                                    can_pass_alongside = (remaining_width_at_obs >= min(v['l'], v['w']))
+                                    
+                                    if not can_pass_alongside:
+                                        # Length reduction: obstacle blocks the path
+                                        item_len_for_calc = max(v['l'], v['w'])
+                                        cap_full = c_len // item_len_for_calc
+                                        cap_reduced = (c_len - obs['l']) // item_len_for_calc
+                                        loss = cap_full - cap_reduced
+                                    else:
+                                        # Passable alongside — subtract occupied slots
+                                        slots_l = math.ceil(obs['l'] / max(v['l'], v['w']))
+                                        slots_w = math.ceil(obs['w'] / min(v['l'], v['w']))
+                                        loss = int(slots_l * slots_w)
+                                    
+                                    variant_geo -= loss
+                                    if variant_geo < 0: variant_geo = 0
+                        
+                        valid_geo_counts.append(variant_geo)
                             
                     if not valid_geo_counts:
-                        # Fits nowhere geometrically
                         continue
                         
                     max_geo_fit = int(max(valid_geo_counts))
-
-                    # --- OBSTACLE CHECK ---
-                    # Subtract capacity lost due to fixed obstacles (e.g., C2 protrusions)
-                    # Logic: If item Height > (CompHeight - ObsHeight), then the Item cannot exist 
-                    # in the footprint of the Obstacle (L_obs x W_obs).
-                    # We subtract the number of items that WOULD have fit in that footprint.
-                    if 'obstacles' in comp:
-                        for obs in comp['obstacles']:
-                            # Check vertical collision
-                            # Effective height under obstacle
-                            h_clearance = c_hgt - obs['h']
-                            
-                            # We check 'v' used for max_geo_fit. 
-                            # Simplification: We iterate variants again or assume the Best Variant dominates.
-                            # Let's be conservative: check if the CHOSEN item height collides.
-                            # Pack logic picks a variant. Here we just have a max count.
-                            # Assume the variant that gave max_geo_fit is the one we use.
-                            
-                            # Which variant gave max?
-                            # We need to loop again or just check all variants?
-                            # If Item fits under clearance, no loss.
-                            
-                            # Re-eval item height (v['h']) against h_clearance.
-                            # But different variants have different H?
-                            # If tipping=False, H is constant.
-                            # If tipping=True, we might have oriented it such that H < Clearance.
-                            # But if the BEST count came from an orientation with H > Clearance, we must subtract.
-                            
-                            # Heuristic: Calculate loss for the "Tall" orientation and subtract it.
-                            # If the item CAN go short (H < Clearance), maybe the packer puts it there?
-                            # But "Count" implies filling the whole hold.
-                            # If we fill the hold, we eventually hit the corner.
-                            # If we use "Tall" orientation everywhere, we lose the corner.
-                            # If we use "Short" orientation, we might fit under.
-                            # BUT `valid_geo_counts` stores [Count_A, Count_B].
-                            # We don't know which one was picked.
-                            
-                            # Refined Logic:
-                            # For each valid count calculation (A and B), perform subtraction immediately.
-                            # Let's rewrite the loops above to include obstacle calc? 
-                            # Hard to splice in.
-                            
-                            # Post-Correction:
-                            # Assume we picked the orientation with max count.
-                            # Does that orientation have H > Clearance?
-                            # If yes, subtract overlap.
-                            # Overlap Count = Ceil(Obs_L / Item_L) * Ceil(Obs_W / Item_W) * (Items_Vertical? No, usually 1 layer if large)
-                            
-                            # Let's assume simplest case (Tipping False, H fixed).
-                            # If item.h > h_clearance:
-                            #    items_lost = ceil(obs.l / item.l) * ceil(obs.w / item.w)
-                            #    max_geo_fit -= items_lost
-                            
-                            # Complex case (Tipping True):
-                            # The variants loop checked multiple H.
-                            # If we picked a variant with low H, no loss.
-                            # If we picked high H, loss.
-                            # We don't know which one.
-                            # But `valid_geo_counts` are just numbers.
-                            # We should have applied the loss *inside* the loop when generating the count.
-                            # Correction: Move this check UP into the loop?
-                            pass # Handled below by re-calc or just applying to 'max of all'? 
-                            # Applying to max is unsafe if max came from a non-colliding variant.
-                            
-                            # Let's assume for now H is fixed (User Box 120x100x100).
-                            # Height 100 > 81 (108-27). Collides.
-                            # Loss = ceil(97/120)*ceil(70/100) = 1*1 = 1?
-                            # Or ceil(97/100)*ceil(70/120) = 1*1 = 1.
-                            
-                            # We will apply a global adjustment if MIN Item Dimension > Clearance?
-                            # No, depends on orientation.
-                            
-                            # For correctness, we really should subtract INSIDE the variant loop.
-                            # Since I cannot easily edit the previous block without large replacement,
-                            # I will apply a post-check using the item's Min Height.
-                            # If Min Height > Clearance, collision is inevitable. 
-                            # If we allow rotation, maybe we put it 50cm high?
-                            
-                            # Check if current 'best' count implies an H.
-                            # We can't know.
-                            # Taking a safe bet: Calculate potential loss.
-                            # If max_geo_fit is large, it likely uses a tall stack?
-                            # Actually, max_geo_fit reduces to floor_area * vertical_layers.
-                            
-                            # Let's calculate the "Lost Slots" logic strictly:
-                            # A slot is (Item_L x Item_W x Item_H).
-                            # If any Slot overlaps Obstacle, it's invalid.
-                            # Overlap Volume = Obs_L * Obs_W * Obs_H.
-                            # Roughly, subtract (ObsVolume / ItemVolume).
-                            # 97*70*27 = 183,330 cm3.
-                            # Item 120*100*100 = 1,200,000 cm3.
-                            # Ratio 0.15. Round to 0?
-                            # Volumetric subtraction is unsafe here (underestimates).
-                            # Geometric subtraction:
-                            # It definitely kills at least 1 unit if it intrudes?
-                            # Yes, collision = death of unit.
-                            # So I subtract 1 if (Item_H > Clearance) and (Item_L/W fits in Obs_L/W range? No, if Obs > 0).
-                            # Any intrusion kills the box in that corner.
-                            # So, max_geo_fit -= 1 ???
-                            # Only if H > Clearance.
-                            
-                            # Let's verify Item Height (assuming standard 'h' from definition if tipping false).
-                            # If tipping true, we might rotate.
-                            # But if the chosen rotation is tall...
-                            # Let's just deduct 1 if ANY variant > Clearance? Too harsh.
-                            # Let's deduct 1 if ALL variants > Clearance? Safe.
-                            
-                            min_dim = item.dims[0]
-                            if min_dim > h_clearance:
-                                # Collision!
-                                # Determine strategy: Length Reduction vs Slot Subtraction.
-                                # If the obstacle blocks the "Path" (i.e., consumes significant width),
-                                # it effectively shortens the compartment.
-                                # Threshold: If ObsW > (FloorW - ItemW)? No.
-                                # If ObsW > 50% of Floor Width? Or if Remaining Width < Item Width.
-                                # Floor Width = 120cm.
-                                # Item Width = 100/120.
-                                # If Remaining Width < Min Item Width (100), then we cannot pass.
-                                
-                                c_floor_w = hold_data.get('floor_width_cm', 120)
-                                remaining_width_at_obs = c_floor_w - obs['w']
-                                
-                                # Use item min dim for passage check
-                                can_pass_alongside = (remaining_width_at_obs >= item.dims[0])
-                                
-                                if not can_pass_alongside:
-                                    # EFFECTIVE LENGTH REDUCTION (Sequential Packing Blocked)
-                                    # The obstacle acts as a new back wall.
-                                    # We should calculate max_geo_fit based on (L_total - L_obs).
-                                    # But max_geo_fit is already calculated.
-                                    # We need to subtract the capacity difference.
-                                    # Diff = Count(L) - Count(L - ObsL).
-                                    # Or simpler: Re-calculate max fit for Reduced Length?
-                                    # We can approximate loss = Slots in ObsL.
-                                    # But without Ceil?
-                                    # Loss = Capacity(L) - Capacity(L - ObsL).
-                                    # Example C1: L=295. Cap=2. L'=155. Cap=1. Loss=1.
-                                    # My previous logic: Loss = Ceil(140/100) = 2. Result 0.
-                                    # Correct Logic: Loss = Floor(ObsL / ItemL)?
-                                    # 140/100 = 1. Result 1. Matches.
-                                    # Example C4: L=608. Cap=5 (taper). ObsL=238.
-                                    # L'=370. Cap=3. Loss=2.
-                                    # Previous Logic: Ceil(238/100) = 3. Result 2.
-                                    # So Floor() seems safer for linear blockage?
-                                    # Let's try logic:
-                                    # If not can_pass_alongside:
-                                    #    effective_len = c_len - obs['l']
-                                    #    # Re-eval simple linear capacity
-                                    #    # This ignores Taper/Height complex logic, but is a good heuristic approximation.
-                                    #    # Or simply:
-                                    #    loss = int(obs['l'] / item.dims[1]) # Use item length (mid dim?)
-                                    #    # items dims [100, 100, 120]. d[1]=100.
-                                    #    # 140/100 = 1.
-                                    #    # 238/100 = 2.
-                                    #    # 295 cap 2 -> 2-1 = 1. Correct.
-                                    #    # 608 cap 6 -> 6-2 = 4 (C4).
-                                    #    pass
-                                    import math
-                                    # EFFECTIVE LENGTH REDUCTION
-                                    # If obstacle blocks width (can't pass), it reduces usable length.
-                                    # Loss = Count(Full) - Count(Reduced)
-                                    # This handles 97cm (kills 1 box) and 140cm (kills 1 box) and 238cm (kills 2 boxes).
-                                    
-                                    # Use item length (d[1] usually 100)
-                                    item_len = item.dims[1]
-                                    
-                                    cap_full = c_len // item_len
-                                    cap_reduced = (c_len - obs['l']) // item_len
-                                    
-                                    # Calculate loss count
-                                    loss = cap_full - cap_reduced
-                                    
-                                    # C1: 295//100=2. (295-140)//100=1. Loss=1. (Result 1). Correct.
-                                    # C2: 560//100=5. (560-97)//100=4. Loss=1. (Result 4). Correct.
-                                    # C4: 608//100=6. (608-238)//100=3. Loss=3. (Result 6-3=3).
-                                    # Note: If Taper limits capacity to 5, and we subtract 3 -> 2.
-                                    
-                                else:
-                                    # Passable (e.g. small pole?). Current config has none.
-                                    # But for completeness:
-                                    slots_l = math.ceil(obs['l'] / item.dims[1])
-                                    slots_w = math.ceil(obs['w'] / item.dims[0])
-                                    loss = int(slots_l * slots_w)
-
-                                # Clamp loss
-                                max_geo_fit -= loss
-                                if max_geo_fit < 0: max_geo_fit = 0
                     
                     # Store geometric limit
                     item.max_count_in_hold[comp['id']] = max_geo_fit
@@ -733,8 +545,10 @@ class Packer:
             
             pallets.append(p)
             
-        # Pack Lower Deck with remaining
-        lower_res = Packer.pack_lower_deck(working_items)
+        pallets, lower_res, working_items = pallets, [], working_items
+        if not options.get('main_deck_only', False):
+            # Pack Lower Deck with remaining
+            lower_res = Packer.pack_lower_deck(working_items)
         
         return pallets, lower_res, working_items
 
@@ -806,7 +620,7 @@ def generate_report(pallets, lower, leftovers, summary_only=False):
             if x.count > 0:
                 print(f"   {x.name}: {x.count}")
     else:
-        print("\n✅ ALl CARGO LOADING COMPLETE")
+        print("\n✅ ALL CARGO LOADING COMPLETE")
 
 
 def interactive_input():
@@ -905,7 +719,7 @@ window.CARGO_DATA = {{
 def main():
     parser = argparse.ArgumentParser(description="SkyGuard Cargo Calculator")
     parser.add_argument("--interactive", action="store_true", help="Run in interactive input mode")
-    # Could add JSON file input here
+    parser.add_argument("--main-deck-only", action="store_true", help="Force all cargo onto main deck pallets")
     
     args = parser.parse_args()
     
@@ -936,11 +750,11 @@ def main():
     if opt == 3:
         # Run both
         print("\nComputing PAG...")
-        pag_p, pag_l, pag_rem = Packer.pack_aircraft(PALLET_OPTIONS[1], items)
+        pag_p, pag_l, pag_rem = Packer.pack_aircraft(PALLET_OPTIONS[1], items, {"main_deck_only": args.main_deck_only})
         w_pag = sum(p.current_weight for p in pag_p) + sum(h['current_weight'] for h in pag_l)
         
         print("Computing PMC...")
-        pmc_p, pmc_l, pmc_rem = Packer.pack_aircraft(PALLET_OPTIONS[2], items)
+        pmc_p, pmc_l, pmc_rem = Packer.pack_aircraft(PALLET_OPTIONS[2], items, {"main_deck_only": args.main_deck_only})
         w_pmc = sum(p.current_weight for p in pmc_p) + sum(h['current_weight'] for h in pmc_l)
         
         print(f"\nRESULTS: PAG={w_pag}kg vs PMC={w_pmc}kg")
@@ -954,7 +768,7 @@ def main():
             final_pallets, final_lower = pmc_p, pmc_l
     else:
         cfg = PALLET_OPTIONS.get(opt, PALLET_OPTIONS[1])
-        pallets, lower, rem = Packer.pack_aircraft(cfg, items)
+        pallets, lower, rem = Packer.pack_aircraft(cfg, items, {"main_deck_only": args.main_deck_only})
         generate_report(pallets, lower, rem)
         final_pallets, final_lower = pallets, lower
     

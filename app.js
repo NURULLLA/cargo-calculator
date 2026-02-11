@@ -1,4 +1,4 @@
-import { Packer, CONFIG } from './packer.js?v=2';
+import { Packer, CONFIG } from './packer.js?v=3';
 import { MainDeckViz } from './ui_visualizer_main.js';
 import { LowerDeckViz } from './ui_visualizer_3d.js';
 
@@ -70,6 +70,7 @@ class CargoApp {
         const tip = document.getElementById('item-tip').checked;
         const noStack = document.getElementById('item-no-stack').checked;
         const priority = document.getElementById('item-priority').checked;
+        const mainDeckOnly = document.getElementById('main-deck-only').checked;
 
         if (isNaN(l) || isNaN(w) || isNaN(h) || isNaN(wt) || isNaN(qty)) {
             alert("Please enter valid numbers");
@@ -86,13 +87,15 @@ class CargoApp {
             count: qty,
             allowTipping: tip,
             noStack,
-            priority
+            priority,
+            mainDeckOnly
         });
         this.renderInventory();
 
         // Reset form
         document.getElementById('item-name').value = '';
         document.getElementById('item-priority').checked = false;
+        document.getElementById('main-deck-only').checked = false;
     }
 
     removeCargoItem(id) {
@@ -112,7 +115,11 @@ class CargoApp {
                 <td>${item.length}x${item.width}x${item.height}</td>
                 <td>${item.weight} kg</td>
                 <td style="font-weight:bold; color:var(--accent);">${totalWt.toLocaleString()} kg</td>
-                <td>${item.count} ${item.noStack ? '<span class="badge" style="background:#ef4444; color:white; padding:2px 4px; border-radius:4px; font-size:0.7em;">Top Only</span>' : ''}</td>
+                <td>
+                    ${item.count} 
+                    ${item.noStack ? '<span class="badge" style="background:#ef4444; color:white; padding:2px 4px; border-radius:4px; font-size:0.7em;">Top Only</span>' : ''}
+                    ${item.mainDeckOnly ? '<span class="badge" style="background:#0ea5e9; color:white; padding:2px 4px; border-radius:4px; font-size:0.7em;">Main Deck Only</span>' : ''}
+                </td>
                 <td>
                     <button class="btn-danger" data-id="${item.id}">
                         <i class="fas fa-trash"></i>
@@ -125,8 +132,18 @@ class CargoApp {
     }
 
     calculate() {
+        console.log("Starting calculation...");
+
         const configCode = document.getElementById('config-select').value;
-        this.results = Packer.packAircraft(configCode, this.cargo);
+        try {
+            this.results = Packer.packAircraft(configCode, this.cargo);
+        } catch (e) {
+            console.error("Packer Error:", e);
+            alert("Calculation Error: " + e.message);
+            return;
+        }
+
+        console.log("Pack Results:", this.results);
 
         // Update Summary Stats
         // NET Weight
@@ -191,7 +208,9 @@ class CargoApp {
             this.results.leftovers.forEach(item => {
                 const div = document.createElement('div');
                 div.className = 'leftover-item';
-                div.innerHTML = `<span>${item.name}</span> <span>${item.count} items</span>`;
+                div.style.padding = '0.5rem';
+                div.style.borderBottom = '1px solid var(--border)';
+                div.innerHTML = `<strong>${item.name}</strong>: ${item.count} units (${item.originalDims.join('x')} cm) - Too large/heavy`;
                 leftoverList.appendChild(div);
             });
         } else {
@@ -285,6 +304,55 @@ class CargoApp {
             </div>
         `;
         document.body.appendChild(modal);
+    }
+
+    optimize() {
+        if (!this.results || this.results.pallets.filter(p => p.currentWeight > 0).length === 0) {
+            alert("Calculate load first");
+            return;
+        }
+
+        const btn = document.getElementById('btn-optimize');
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Shuffling...';
+        btn.disabled = true;
+
+        setTimeout(() => {
+            const configCode = document.getElementById('config-select').value;
+            let activePallets = this.results.pallets.filter(p => p.currentWeight > 0);
+
+            // Random shuffle of active pallets into available positions
+            let positions = Array.from({ length: CONFIG.PALLET_OPTIONS[configCode].count }, (_, i) => i);
+            this.shuffleArray(positions);
+
+            let newPallets = Array.from({ length: CONFIG.PALLET_OPTIONS[configCode].count }, (_, i) => ({
+                id: i + 1,
+                config: CONFIG.PALLET_OPTIONS[configCode],
+                layers: [],
+                currentWeight: 0,
+                tareWeight: CONFIG.PALLET_OPTIONS[configCode].tare_weight,
+                maxNetWeight: CONFIG.PALLET_OPTIONS[configCode].max_weight - CONFIG.PALLET_OPTIONS[configCode].tare_weight
+            }));
+
+            activePallets.forEach((p, idx) => {
+                const targetIdx = positions[idx];
+                newPallets[targetIdx] = { ...p, id: targetIdx + 1 };
+            });
+
+            this.results.pallets = newPallets;
+            this.calculate(); // Recalculate totals
+            this.mdViz.update(this.results);
+
+            btn.innerHTML = originalHtml;
+            btn.disabled = false;
+        }, 500);
+    }
+
+    shuffleArray(array) {
+        for (let i = array.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [array[i], array[j]] = [array[j], array[i]];
+        }
     }
 }
 

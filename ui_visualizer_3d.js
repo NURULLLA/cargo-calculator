@@ -68,8 +68,8 @@ export class LowerDeckViz {
         const COMP_GEOS = [
             { id: "C1", pos_x: -905, length: 295, h: 108, w_floor: 120, w_top: 247, obs: [{ l: 140, w: 72, h: 134, x_align: 'end', z_align: 'right', z_offset: 40 }] },
             { id: "C2", pos_x: -560, length: 560, h: 108, w_floor: 120, w_top: 247, obs: [{ l: 97, w: 70, h: 27, y_align: 'top', z_align: 'right', x_align: 'end' }] },
-            { id: "C3", pos_x: 100, length: 440, h: 112, w_floor: 120, w_top: 247, obs: [] },
-            { id: "C4", pos_x: 540, length: 608, h: 112, w_floor: 120, w_top: 247, obs: [{ l: 238, w: 72, h: 134, x_align: 'start', z_align: 'right', z_offset: 40 }] }
+            { id: "C3", pos_x: 100, length: 440, h: 112, w_floor: 90, w_top: 247, obs: [] },
+            { id: "C4", pos_x: 540, length: 608, h: 112, w_floor: 90, w_top: 247, obs: [{ l: 238, w: 72, h: 134, x_align: 'start', z_align: 'right', z_offset: 40 }] }
         ];
 
         COMP_GEOS.forEach(geo => {
@@ -95,7 +95,6 @@ export class LowerDeckViz {
                 if (geo.id === "C4") currentX += 238;
 
                 resultComp.items.forEach(itemBatch => {
-                    // Use stored dims or fallback
                     const bL = itemBatch.l || 50;
                     const bH = itemBatch.h || 50;
                     const bW = itemBatch.w || 50;
@@ -111,21 +110,19 @@ export class LowerDeckViz {
                         const longIndex = Math.floor(i / sliceCount); // 0, 1, 2...
 
                         // In Slice Position
-                        // rowY goes 0..rowsY-1
-                        // colZ goes 0..colsZ-1
                         const colZ = sliceIndex % colsZ;
                         const rowY = Math.floor(sliceIndex / colsZ);
 
                         const xPos = currentX + (longIndex * bL) + (bL / 2);
-                        // Y stats from floor (-h/2)
                         const yPos = -(geo.h / 2) + (rowY * bH) + (bH / 2);
-                        // Z starts from left (-w_floor/2)
-                        const zPos = -(geo.w_floor / 2) + (colZ * bW) + (bW / 2);
+
+                        // Centering Logic
+                        const usedW = colsZ * bW;
+                        const startOffset = (geo.w_floor - usedW) / 2;
+                        const zPos = -(geo.w_floor / 2) + startOffset + (colZ * bW) + (bW / 2);
 
                         const box = this.createBox(bL, bH, bW);
-                        // Reset local pos, we used absolute calc above relative to center
                         box.position.set(xPos, yPos, zPos);
-
                         group.add(box);
                     }
                     // Advance X for next batch

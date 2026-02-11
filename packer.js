@@ -160,8 +160,9 @@ class Pallet {
         }
         let base = Math.min(c.width_base, fuselageW);
         // Tail Constraints: Narrower fuselage at the last position
-        if (c.code === "PAG" && this.id === 15) base *= 0.85; // 15% reduction
-        else if (c.code === "PMC" && this.id === 13) base *= 0.85; // 15% reduction
+        // Aligned with Python logic: 0.93 for PAG, 0.95 for PMC
+        if (c.code === "PAG" && this.id === 15) base *= 0.93;
+        else if (c.code === "PMC" && this.id === 13) base *= 0.95;
         return base;
     }
 
@@ -178,11 +179,15 @@ const Packer = {
 
     calculateLayer: (pallet, variant) => {
         let checkHeight = pallet.currentHeight + variant.h;
-        if (checkHeight > pallet.config.max_height) return null;
+        if (checkHeight > pallet.config.max_height) {
+            // console.log(`CalcLayer fail: Height limit. Check: ${checkHeight}, Max: ${pallet.config.max_height}`);
+            return null;
+        }
 
         let fuselageW = pallet.getFuselageWidth(checkHeight);
         let availCross = Math.min(pallet.config.length_cross, fuselageW);
         let availLong = pallet.config.width_long;
+        // console.log(`CalcLayer: FuselageW=${fuselageW}, AvailCross=${availCross}, BoxL=${variant.l}, BoxW=${variant.w}`); // Verbose
 
         if (availCross < Math.min(variant.l, variant.w)) return null;
 
@@ -218,8 +223,10 @@ const Packer = {
         };
     },
 
-    packAircraft: (configCode, cargoItems) => {
+    packAircraft: (configCode, cargoItems, options = {}) => {
         const config = CONFIG.PALLET_OPTIONS[configCode];
+
+        const mainDeckOnlyGlobal = options.mainDeckOnly || false;
 
         // --- PRE-PROCESS: SORT BY PRIORITY THEN FUSELAGE OPTIMIZATION ---
         // 1. Map to CargoItem objects
@@ -228,6 +235,7 @@ const Packer = {
         let workingItems = cargoItems.map(i => {
             const item = new CargoItem(i.id, i.name, i.length, i.width, i.height, i.weight, i.count, i.allowTipping, i.noStack);
             item.priority = i.priority || false;
+            item.mainDeckOnly = i.mainDeckOnly || false;
             return item;
         });
 
@@ -295,14 +303,15 @@ const Packer = {
             pallets.push(p);
         }
 
-        // --- STEP 2: PACK LOWER DECK SECOND ---
         let lowerDeckResults = [];
+        if (mainDeckOnlyGlobal) return { pallets, lowerDeck: lowerDeckResults, leftovers: workingItems.filter(i => i.count > 0) };
+
         for (let hold of CONFIG.LOWER_DECK) {
             let holdRes = { name: hold.name, current_weight: 0, compartments: [] };
             for (let comp of hold.compartments) {
                 let cData = { id: comp.id, name: comp.name, items: [], weight: 0, volume: 0, max_weight: comp.max_weight, max_volume: comp.max_volume };
                 for (let item of workingItems) {
-                    if (item.count <= 0) continue;
+                    if (item.count <= 0 || item.mainDeckOnly) continue;
 
                     // Specific check for lower deck doors
                     let [i_min, i_mid] = item.dims;
@@ -336,10 +345,40 @@ const Packer = {
                     }
 
                     let maxGeo = Math.floor(comp.max_length_cm / itemLen) * Math.floor(comp.max_height_cm / itemHeight);
-                    // Assume hold width allows at least 2 rows if small
-                    let rows = Math.floor(hold.floor_width_cm / (item.allowTipping ? item.dims[0] : Math.min(item.originalDims[0], item.originalDims[1])));
+
+                    // --- HIGH FIDELITY LOWER DECK TAPER (Ported from cargo_calculator.py) ---
+                    // Implement power-law taper based on height and width constraints
+                    let c_hgt = comp.max_height_cm;
+                    let c_min_hgt = comp.min_height_cm || c_hgt;
+                    let len_limit_h = comp.max_length_cm;
+
+                    if (c_hgt > c_min_hgt) {
+                        if (itemHeight > c_min_hgt) {
+                            const POWER_H = 3.0;
+                            let ratio_h = Math.max(0.0, Math.min(1.0, (c_hgt - itemHeight) / (c_hgt - c_min_hgt)));
+                            len_limit_h = Math.floor(comp.max_length_cm * Math.pow(ratio_h, 1 / POWER_H));
+                        }
+                    }
+
+                    const c_wid_start = hold.floor_width_cm;
+                    const c_wid_end = hold.min_floor_width_cm || c_wid_start;
+                    let len_limit_w = comp.max_length_cm;
+
+                    const item_w_floor = item.allowTipping ? item.dims[0] : Math.min(item.originalDims[0], item.originalDims[1]);
+
+                    if (item_w_floor > c_wid_end) {
+                        const POWER_W = 4.0;
+                        let ratio_w = Math.max(0.0, Math.min(1.0, (c_wid_start - item_w_floor) / (c_wid_start - c_wid_end)));
+                        len_limit_w = Math.floor(comp.max_length_cm * Math.pow(ratio_w, 1 / POWER_W));
+                    }
+
+                    let eff_len = Math.min(len_limit_h, len_limit_w);
+                    let fit_l = Math.floor(eff_len / itemLen);
+
+                    let rows = Math.floor(c_wid_start / item_w_floor);
                     if (rows < 1) rows = 1;
-                    maxGeo *= rows;
+
+                    maxGeo = fit_l * rows * Math.floor(c_hgt / itemHeight);
 
                     if (comp.obstacles) {
                         for (let obs of comp.obstacles) {
