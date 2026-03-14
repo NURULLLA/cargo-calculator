@@ -239,21 +239,34 @@ const Packer = {
         const mainDeckOnlyGlobal = options.mainDeckOnly || false;
 
         // --- PRE-PROCESS: GROUP IDENTICAL ITEMS THEN SORT ---
-        // Group items with the exact same dimensions and priority so they can share layers on pallets efficiently
+        // Group items with the exact same dimensions, weight, and priority so they can share layers on pallets efficiently
         let groupedItemsMap = new Map();
         
         for (let i of cargoItems) {
             if (i.count <= 0) continue;
-            let key = `${i.length}_${i.width}_${i.height}_${i.priority || false}_${i.noStack || false}_${i.allowTipping || false}_${i.mainDeckOnly || false}`;
+            let key = `${i.length}_${i.width}_${i.height}_${i.weight}_${i.priority || false}_${i.noStack || false}_${i.allowTipping || false}_${i.mainDeckOnly || false}`;
             if (groupedItemsMap.has(key)) {
                 let existing = groupedItemsMap.get(key);
                 existing.count += i.count;
-                // Append name only if it's not too long, or just track it's a group
-                if (!existing.name.includes(" (Grouped)")) {
-                    existing.name = existing.name + " (Grouped)";
+                
+                // Track original names to provide a better label
+                if (!existing.originalNames) {
+                    existing.originalNames = [existing.name];
+                }
+                if (!existing.originalNames.includes(i.name)) {
+                    existing.originalNames.push(i.name);
+                }
+                
+                // Update display name based on grouping
+                if (existing.originalNames.length <= 3) {
+                    existing.name = existing.originalNames.join(", ");
+                } else {
+                    existing.name = `${existing.originalNames[0]} (+${existing.originalNames.length - 1} identical)`;
                 }
             } else {
-                groupedItemsMap.set(key, { ...i });
+                let newItem = { ...i };
+                newItem.originalNames = [i.name];
+                groupedItemsMap.set(key, newItem);
             }
         }
         
