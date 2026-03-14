@@ -1,4 +1,4 @@
-import { Packer, CONFIG } from './packer.js?v=3';
+import { Packer, CONFIG } from './packer.js?v=6';
 import { MainDeckViz } from './ui_visualizer_main.js';
 import { LowerDeckViz } from './ui_visualizer_3d.js';
 
@@ -23,11 +23,140 @@ class CargoApp {
         // Add item
         document.getElementById('btn-add-item').addEventListener('click', () => this.addCargoItem());
 
+        // Excel Import
+        const excelBtn = document.getElementById('btn-import-excel');
+        const excelInput = document.getElementById('excel-upload');
+        if (excelBtn && excelInput) {
+            excelBtn.addEventListener('click', () => excelInput.click());
+            excelInput.addEventListener('change', (e) => this.handleExcelImport(e));
+        }
+
         // Calculate
         document.getElementById('btn-calculate').addEventListener('click', () => this.calculate());
 
         // Initial render
         this.renderInventory();
+    }
+
+    async handleExcelImport(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const statusEl = document.getElementById('import-status');
+        if (statusEl) {
+            statusEl.textContent = 'Processing Excel file...';
+            statusEl.className = 'import-status success';
+            statusEl.style.display = 'block';
+        }
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+                this.processExcelData(jsonData);
+                event.target.value = ''; // Reset input
+            } catch (err) {
+                console.error("Excel Import Error:", err);
+                if (statusEl) {
+                    statusEl.textContent = 'Error parsing Excel: ' + err.message;
+                    statusEl.className = 'import-status error';
+                }
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
+    processExcelData(rows) {
+        if (!rows || rows.length < 2) {
+            this.showImportStatus('No data found in Excel', 'error');
+            return;
+        }
+
+        const headers = rows[0].map(h => String(h || '').trim().toLowerCase());
+        const dataRows = rows.slice(1);
+
+        // Fuzzy Column Mapping
+        const getColIdx = (aliases) => {
+            // Priority 1: Exact match
+            let idx = headers.findIndex(h => aliases.some(a => h === a.toLowerCase()));
+            if (idx !== -1) return idx;
+            
+            // Priority 2: Starts with
+            idx = headers.findIndex(h => aliases.some(a => h.startsWith(a.toLowerCase())));
+            if (idx !== -1) return idx;
+
+            // Priority 3: Includes (only for longer aliases)
+            return headers.findIndex(h => aliases.some(a => a.length > 2 && h.includes(a.toLowerCase())));
+        };
+
+        const colMapping = {
+            name: getColIdx(['box', 'item name', 'name', 'description', 'batch', 'cargo', 'box #']),
+            width: getColIdx(['w cm', 'width', 'w (cm)', 'breadth', 'w']),
+            length: getColIdx(['d cm', 'l cm', 'length', 'l (cm)', 'depth', 'd', 'l']),
+            height: getColIdx(['h cm', 'height', 'h (cm)', 'h']),
+            weight: getColIdx(['kg', 'weight', 'wt', 'kgs', 'weight kg']),
+            qty: getColIdx(['qty', 'quantity', 'count', 'units', 'pcs'])
+        };
+
+        console.log("Column Mapping:", colMapping);
+
+        let importCount = 0;
+        let skipCount = 0;
+
+        dataRows.forEach((row, idx) => {
+            // Skip empty rows
+            if (!row || row.length === 0 || !row.some(cell => cell !== null && cell !== '')) {
+                return;
+            }
+
+            const name = colMapping.name !== -1 ? String(row[colMapping.name] || `Item ${idx + 1}`) : `Item ${idx + 1}`;
+            const l = colMapping.length !== -1 ? parseFloat(row[colMapping.length]) : NaN;
+            const w = colMapping.width !== -1 ? parseFloat(row[colMapping.width]) : NaN;
+            const h = colMapping.height !== -1 ? parseFloat(row[colMapping.height]) : NaN;
+            const wt = colMapping.weight !== -1 ? parseFloat(row[colMapping.weight]) : NaN;
+            const qty = colMapping.qty !== -1 ? parseInt(row[colMapping.qty]) || 1 : 1;
+
+            if (isNaN(l) || isNaN(w) || isNaN(h) || isNaN(wt)) {
+                console.warn(`Skipping row ${idx + 2}: Invalid dimensions/weight`, row);
+                skipCount++;
+                return;
+            }
+
+            this.cargo.push({
+                id: Date.now() + Math.random(),
+                name,
+                length: l,
+                width: w,
+                height: h,
+                weight: wt,
+                count: qty,
+                allowTipping: true,
+                noStack: false,
+                priority: false,
+                mainDeckOnly: false
+            });
+            importCount++;
+        });
+
+        this.renderInventory();
+        this.showImportStatus(`Imported ${importCount} items. ${skipCount > 0 ? `Skipped ${skipCount} invalid rows.` : ''}`, 'success');
+    }
+
+    showImportStatus(msg, type) {
+        const statusEl = document.getElementById('import-status');
+        if (statusEl) {
+            statusEl.textContent = msg;
+            statusEl.className = `import-status ${type}`;
+            statusEl.style.display = 'block';
+            setTimeout(() => {
+                statusEl.style.display = 'none';
+            }, 5000);
+        }
     }
 
     switchTab(tabId) {
@@ -135,8 +264,9 @@ class CargoApp {
         console.log("Starting calculation...");
 
         const configCode = document.getElementById('config-select').value;
+        const aircraftId = document.getElementById('aircraft-select').value;
         try {
-            this.results = Packer.packAircraft(configCode, this.cargo);
+            this.results = Packer.packAircraft(configCode, this.cargo, { aircraftId });
         } catch (e) {
             console.error("Packer Error:", e);
             alert("Calculation Error: " + e.message);
@@ -146,17 +276,16 @@ class CargoApp {
         console.log("Pack Results:", this.results);
 
         // Update Summary Stats
-        // NET Weight
         const totalW = this.results.pallets.reduce((acc, p) => acc + p.currentWeight, 0) +
             this.results.lowerDeck.reduce((acc, h) => acc + h.current_weight, 0);
 
-        // GROSS Weight (Net + Tare) & Volume
-        let totalGross = this.results.lowerDeck.reduce((acc, h) => acc + h.current_weight, 0);
+        const currentConfig = CONFIG.PALLET_OPTIONS[configCode];
+        let totalGross = (currentConfig.count * currentConfig.tare_weight) +
+            this.results.lowerDeck.reduce((acc, h) => acc + h.current_weight, 0);
         let totalVolume = 0;
 
-        // Pallets Gross = Net + Tare
         this.results.pallets.forEach(p => {
-            if (p.currentWeight > 0) totalGross += (p.currentWeight + p.tareWeight);
+            totalGross += p.currentWeight;
             p.layers.forEach(l => {
                 if (l.dim_cross && l.dim_long && l.height && l.count) {
                     totalVolume += (l.dim_cross * l.dim_long * l.height * l.count) / 1000000;
@@ -173,10 +302,32 @@ class CargoApp {
             });
         });
 
+        const maxLimit = this.results.maxGrossLimit;
+        const loadPercentage = ((totalGross / maxLimit) * 100).toFixed(1);
+        const limitColor = totalGross > maxLimit * 0.95 ? '#ef4444' : 'var(--accent)';
+
+        // Requested vs Capability
+        const requestedNet = this.cargo.reduce((acc, i) => acc + (i.weight * i.count), 0);
+        const totalTare = currentConfig.count * currentConfig.tare_weight;
+        const maxNetCapability = maxLimit - totalTare;
+
+        const isNetOverload = requestedNet > maxNetCapability;
+        const netColor = isNetOverload ? '#ef4444' : 'var(--text)';
+
         document.getElementById('total-weight').innerHTML = `
-            Net: ${totalW.toLocaleString()} kg<br>
-            <span style="font-size:0.8em; color:var(--accent);">Gross: ${totalGross.toLocaleString()} kg</span><br>
-            <span style="font-size:0.8em; color:var(--text-muted);">Vol: ${totalVolume.toFixed(2)} m³</span>
+            <div style="margin-bottom: 10px; border-bottom: 1px solid var(--border); padding-bottom: 10px;">
+                <small style="color:var(--text-muted); display:block; margin-bottom:4px;">REQUESTED LOAD</small>
+                <span style="color:${netColor}; font-weight:bold;">Net: ${requestedNet.toLocaleString()} / ${maxNetCapability.toLocaleString()} kg</span>
+                ${isNetOverload ? '<br><small style="color:#ef4444;"><i class="fas fa-exclamation-triangle"></i> Structural Limit Exceeded</small>' : ''}
+            </div>
+            <div style="margin-bottom: 10px;">
+                <small style="color:var(--text-muted); display:block; margin-bottom:4px;">ACTUAL LOADED (ZFW)</small>
+                Net: ${totalW.toLocaleString()} kg<br>
+                <span style="font-size:0.85em; color:${limitColor}; font-weight:bold;">Gross: ${totalGross.toLocaleString()} / ${maxLimit.toLocaleString()} kg (${loadPercentage}%)</span>
+            </div>
+            <div style="font-size:0.8em; color:var(--text-muted);">
+                Vol: ${totalVolume.toFixed(2)} m³ | Tare: ${totalTare.toLocaleString()} kg
+            </div>
         `;
 
         // Total Boxes Calculation
@@ -210,7 +361,7 @@ class CargoApp {
                 div.className = 'leftover-item';
                 div.style.padding = '0.5rem';
                 div.style.borderBottom = '1px solid var(--border)';
-                div.innerHTML = `<strong>${item.name}</strong>: ${item.count} units (${item.originalDims.join('x')} cm) - Too large/heavy`;
+                div.innerHTML = `<strong>${item.name}</strong>: ${item.count} units - Could not fit (Limit or Space)`;
                 leftoverList.appendChild(div);
             });
         } else {
@@ -261,6 +412,14 @@ class CargoApp {
                     <span>${comp.weight.toLocaleString()} kg</span>
                 `;
                 container.appendChild(item);
+
+                // Add Details Button for Lower Deck
+                const btn = document.createElement('button');
+                btn.className = 'btn-sm btn-secondary';
+                btn.innerHTML = '<i class="fas fa-list"></i> View Manifest';
+                btn.style.marginTop = '0.5rem';
+                btn.onclick = () => this.showLowerDeckManifest(comp);
+                item.appendChild(btn);
             });
         });
     }
@@ -278,9 +437,11 @@ class CargoApp {
         text += `<p>Total Weight: ${pallet.currentWeight} kg</p>`;
         text += `<div class="manifest-list">`;
 
+        let cumulativeHeight = 0;
         pallet.layers.forEach((l, idx) => {
+            cumulativeHeight += l.height;
             text += `<div class="manifest-layer">
-                <strong>Layer ${idx + 1}</strong> (Height: ${l.height}cm)<br>
+                <strong>Layer ${idx + 1}</strong> (Height: ${l.height}cm | Total: ${cumulativeHeight}cm)<br>
                 ${l.count} x ${l.box_name} <br>`;
 
             // Add metadata details if available
@@ -294,13 +455,33 @@ class CargoApp {
         });
         text += `</div>`;
 
-        // Simple Modal Implementation
+        this.showModal(text);
+    }
+
+    showLowerDeckManifest(comp) {
+        let text = `<h3>Compartment ${comp.id} (${comp.name}) Manifest</h3>`;
+        text += `<p>Total Weight: ${comp.weight.toLocaleString()} kg</p>`;
+        text += `<div class="manifest-list">`;
+
+        comp.items.forEach((item, idx) => {
+            text += `<div class="manifest-layer">
+                <strong>Batch ${idx + 1}: ${item.name}</strong><br>
+                Qty: ${item.count} | Dims: ${item.l}x${item.w}x${item.h} cm<br>
+                Weight: ${item.weight ? item.weight.toLocaleString() + ' kg' : 'N/A'}
+            </div>`;
+        });
+        text += `</div>`;
+
+        this.showModal(text);
+    }
+
+    showModal(content) {
         const modal = document.createElement('div');
         modal.className = 'modal-overlay';
         modal.innerHTML = `
             <div class="modal-card">
                 <button class="close-btn" onclick="this.closest('.modal-overlay').remove()">&times;</button>
-                ${text}
+                ${content}
             </div>
         `;
         document.body.appendChild(modal);

@@ -15,6 +15,7 @@
             }
         }
     </script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 </head>
 
 <body class="dark-theme">
@@ -53,6 +54,10 @@
                     <p id="tab-subtitle">Define batch dimensions and quantities</p>
                 </div>
                 <div class="header-actions">
+                    <select id="aircraft-select" class="btn-secondary" title="Select Aircraft">
+                        <option value="UK57057">UK57057 (Max: 36,813 kg)</option>
+                        <option value="UK57058">UK57058 (Max: 36,118 kg)</option>
+                    </select>
                     <select id="config-select" class="btn-secondary" title="Select Aircraft Configuration">
                         <option value="PAG">B757-200 (15x PAG)</option>
                         <option value="PMC">B757-200 (13x PMC)</option>
@@ -104,14 +109,20 @@
                                 <label><input type="checkbox" id="item-priority"> <i class="fas fa-star"
                                         style="color:#fbbf24;"></i> High Priority</label>
                             </div>
-                            <div class="input-group checkbox"
-                                style="margin-top: 5px; grid-column: 1 / -1; border-top: 1px solid var(--border); padding-top: 10px;">
-                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                                    <input type="checkbox" id="main-deck-only" style="width: auto;">
+                            <div class="input-group checkbox separator-top">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="main-deck-only">
                                     <strong>Main Deck Only Loading</strong>
                                 </label>
                             </div>
-                            <button id="btn-add-item" class="btn-success">Add to List</button>
+                            <div class="btn-group">
+                                <button id="btn-add-item" class="btn-success">Add to List</button>
+                                <button id="btn-import-excel" class="btn-secondary">
+                                    <i class="fas fa-file-excel"></i> Import Excel
+                                </button>
+                                <input type="file" id="excel-upload" accept=".xlsx, .xls" style="display: none;">
+                            </div>
+                            <div id="import-status" class="import-status"></div>
                         </div>
                     </div>
 
@@ -200,7 +211,7 @@
     <!-- Notification system -->
     <div id="toast-container"></div>
 
-    <script type="module" src="app.js"></script>
+    <script type="module" src="app.js?v=2.1"></script>
 </body>
 
 </html>
