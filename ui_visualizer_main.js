@@ -169,5 +169,53 @@ export class MainDeckViz {
             this.scene.add(group);
             currentX += p.config.width_long + gap;
         });
+
+        this.addIndicators(currentX);
+    }
+
+    addIndicators(totalWidth) {
+        // Create canvas for text
+        const createTextLabel = (text, color) => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = 256;
+            canvas.height = 128;
+            ctx.fillStyle = color;
+            ctx.font = 'bold 80px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, 128, 64);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            const mat = new THREE.SpriteMaterial({ map: texture, transparent: true });
+            const sprite = new THREE.Sprite(mat);
+            sprite.scale.set(600, 300, 1);
+            return sprite;
+        };
+
+        const nose = createTextLabel('NOSE', '#38bdf8');
+        nose.position.set(-2000, 500, 0);
+        this.scene.add(nose);
+
+        const tail = createTextLabel('TAIL', '#f43f5e');
+        tail.position.set(2000, 500, 0);
+        this.scene.add(tail);
+
+        // Add arrows
+        const arrowHelperNose = new THREE.ArrowHelper(
+            new THREE.Vector3(-1, 0, 0),
+            new THREE.Vector3(-1700, 500, 0),
+            200,
+            0x38bdf8
+        );
+        this.scene.add(arrowHelperNose);
+
+        const arrowHelperTail = new THREE.ArrowHelper(
+            new THREE.Vector3(1, 0, 0),
+            new THREE.Vector3(1700, 500, 0),
+            200,
+            0xf43f5e
+        );
+        this.scene.add(arrowHelperTail);
     }
 }

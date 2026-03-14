@@ -708,7 +708,7 @@ window.CARGO_DATA = {
                         "count": 4
                     },
                     "side": null,
-                    "unused_width": 27.519999999999982,
+                    "unused_width": 42.72000000000003,
                     "unused_len": 9.0,
                     "name": "TestBox",
                     "orient_type": "A (Length along Fuselage Width)"
@@ -729,7 +729,7 @@ window.CARGO_DATA = {
                         "count": 2
                     },
                     "side": null,
-                    "unused_width": 5.23582089552238,
+                    "unused_width": 12.351492537313447,
                     "unused_len": 9.0,
                     "name": "TestBox",
                     "orient_type": "A (Length along Fuselage Width)"
@@ -778,10 +778,10 @@ window.CARGO_DATA = {
         "items": [
             {
                 "name": "TestBox",
-                "count": 3
+                "count": 4
             }
         ],
-        "weight": 240.0
+        "weight": 320.0
     }
 ]
 };

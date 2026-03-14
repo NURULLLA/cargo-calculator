@@ -88,6 +88,7 @@ export class LowerDeckViz {
             });
 
             // Boxes
+            const resultComp = results.lowerDeck.flatMap(h => h.compartments).find(c => c.id === geo.id);
             if (resultComp) {
                 let startX = -(geo.length / 2);
                 if (geo.id === "C4") startX += 238;

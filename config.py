@@ -53,7 +53,7 @@ PALLET_OPTIONS = {
         "length_cross": 303,    # cm (Usable: 317 - 14 border)
         "width_long": 229,      # cm (Usable: 243 - 14 border)
         "max_height": MAX_FUSELAGE_HEIGHT_CM,
-        "tare_weight": 117,
+        "tare_weight": 120,
          "contour_start_height": 114.3,
         "contour_mid_height": 174.5,
         "width_base": 304.0,
