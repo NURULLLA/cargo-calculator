@@ -88,51 +88,104 @@ export class LowerDeckViz {
             });
 
             // Boxes
-            const resultComp = results.lowerDeck.flatMap(h => h.compartments).find(c => c.id === geo.id);
             if (resultComp) {
-                let currentX = -(geo.length / 2);
-                // Obstacle adjustments (simplified)
-                if (geo.id === "C4") currentX += 238;
+                let startX = -(geo.length / 2);
+                if (geo.id === "C4") startX += 238;
+
+                let curX = 0;
+                let curY = 0;
+                let curZ = 0;
+                let rowMaxH = 0;
+                let sliceMaxL = 0;
 
                 resultComp.items.forEach(itemBatch => {
                     const bL = itemBatch.l || 50;
                     const bH = itemBatch.h || 50;
                     const bW = itemBatch.w || 50;
 
-                    // Capacity calc
-                    const colsZ = Math.floor(geo.w_floor / bW) || 1;
-                    const rowsY = Math.floor(geo.h / bH) || 1;
-                    const sliceCount = colsZ * rowsY;
-
                     for (let i = 0; i < itemBatch.count; i++) {
-                        // Calculate relative position in current slice or new slice
-                        const sliceIndex = i % sliceCount; // 0 to sliceCount-1
-                        const longIndex = Math.floor(i / sliceCount); // 0, 1, 2...
+                        // Check if it fits in Z (width)
+                        if (curZ + bW > geo.w_floor) {
+                            curZ = 0;
+                            curY += rowMaxH + 2; // small gap
+                            rowMaxH = 0;
+                        }
+                        // Check if it fits in Y (height)
+                        if (curY + bH > geo.h) {
+                            curY = 0;
+                            curZ = 0;
+                            curX += sliceMaxL + 5; // advance slice
+                            sliceMaxL = 0;
+                            rowMaxH = 0;
+                        }
 
-                        // In Slice Position
-                        const colZ = sliceIndex % colsZ;
-                        const rowY = Math.floor(sliceIndex / colsZ);
-
-                        const xPos = currentX + (longIndex * bL) + (bL / 2);
-                        const yPos = -(geo.h / 2) + (rowY * bH) + (bH / 2);
-
-                        // Centering Logic
-                        const usedW = colsZ * bW;
-                        const startOffset = (geo.w_floor - usedW) / 2;
-                        const zPos = -(geo.w_floor / 2) + startOffset + (colZ * bW) + (bW / 2);
+                        // Local coordinates within the compartment
+                        const xPos = startX + curX + (bL / 2);
+                        const yPos = -(geo.h / 2) + curY + (bH / 2);
+                        const zPos = -(geo.w_floor / 2) + curZ + (bW / 2);
 
                         const box = this.createBox(bL, bH, bW);
                         box.position.set(xPos, yPos, zPos);
                         group.add(box);
+
+                        // Advance Z
+                        curZ += bW + 2;
+                        if (bH > rowMaxH) rowMaxH = bH;
+                        if (bL > sliceMaxL) sliceMaxL = bL;
                     }
-                    // Advance X for next batch
-                    const totalSlices = Math.ceil(itemBatch.count / sliceCount);
-                    currentX += totalSlices * bL + 5; // Gap
                 });
             }
 
             this.scene.add(group);
         });
+
+        this.addIndicators();
+    }
+
+    addIndicators() {
+        // Create canvas for text
+        const createTextLabel = (text, color) => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = 256;
+            canvas.height = 128;
+            ctx.fillStyle = color;
+            ctx.font = 'bold 80px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, 128, 64);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            const mat = new THREE.SpriteMaterial({ map: texture, transparent: true });
+            const sprite = new THREE.Sprite(mat);
+            sprite.scale.set(400, 200, 1);
+            return sprite;
+        };
+
+        const nose = createTextLabel('NOSE', '#38bdf8');
+        nose.position.set(-1100, 200, 0); // Front of plane (negative X)
+        this.scene.add(nose);
+
+        const tail = createTextLabel('TAIL', '#f43f5e');
+        tail.position.set(1300, 200, 0); // Back of plane (positive X)
+        this.scene.add(tail);
+
+        // Add arrows
+        const arrowHelperNose = new THREE.ArrowHelper(
+            new THREE.Vector3(-1, 0, 0),
+            new THREE.Vector3(-950, 200, 0),
+            100,
+            0x38bdf8
+        );
+        this.scene.add(arrowHelperNose);
+
+        const arrowHelperTail = new THREE.ArrowHelper(
+            new THREE.Vector3(1, 0, 0),
+            new THREE.Vector3(1150, 200, 0),
+            100,
+            0xf43f5e
+        );
+        this.scene.add(arrowHelperTail);
     }
 
     createHullMesh(l, wf, wt, h) {

@@ -1,6 +1,6 @@
-import { Packer, CONFIG } from './packer.js?v=7';
+import { Packer, CONFIG } from './packer.js?v=8';
 import { MainDeckViz } from './ui_visualizer_main.js';
-import { LowerDeckViz } from './ui_visualizer_3d.js';
+import { LowerDeckViz } from './ui_visualizer_3d.js?v=2.1';
 
 class CargoApp {
     constructor() {
