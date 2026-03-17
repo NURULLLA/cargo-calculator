@@ -95,8 +95,8 @@ const CONFIG = {
     ],
 
     AIRCRAFT_SPEC: {
-        "UK57057": { name: "UK57057", max_gross_payload: 36813 },
-        "UK57058": { name: "UK57058", max_gross_payload: 36118 }
+        "UK75057": { name: "UK75057", max_gross_payload: 36513 },
+        "UK75058": { name: "UK75058", max_gross_payload: 35818 }
     }
 };
 
@@ -230,7 +230,7 @@ const Packer = {
 
     packAircraft: (configCode, cargoItems, options = {}) => {
         const config = CONFIG.PALLET_OPTIONS[configCode];
-        const aircraftId = options.aircraftId || "UK57057";
+        const aircraftId = options.aircraftId || "UK75057";
         const maxGrossLimit = CONFIG.AIRCRAFT_SPEC[aircraftId]?.max_gross_payload || 999999;
 
         // Start with the tare weight of ALL pallets in the configuration
