@@ -74,7 +74,7 @@ const CONFIG = {
         {
             id: "AFT",
             name: "AFT HOLD",
-            max_weight: 9079,
+            max_weight: 9379,
             door: { width: 140, height: 112 },
             floor_width_cm: 120,
             min_floor_width_cm: 90,
@@ -86,18 +86,13 @@ const CONFIG = {
                 },
                 {
                     id: "C4", name: "C4 (AFT)",
-                    max_weight: 5306, max_volume: 30.7,
+                    max_weight: 5606, max_volume: 30.7,
                     max_length_cm: 608, max_height_cm: 112,
                     obstacles: [{ l: 238, w: 72, h: 134, name: "Structural Block" }]
                 }
             ]
         }
-    ],
-
-    AIRCRAFT_SPEC: {
-        "UK75057": { name: "UK75057", max_gross_payload: 36513 },
-        "UK75058": { name: "UK75058", max_gross_payload: 35818 }
-    }
+    ]
 };
 
 class CargoItem {
@@ -165,9 +160,8 @@ class Pallet {
         }
         let base = Math.min(c.width_base, fuselageW);
         // Tail Constraints: Narrower fuselage at the last position
-        // Aligned with Python logic: 0.93 for PAG, 0.95 for PMC
-        if (c.code === "PAG" && this.id === 15) base *= 0.93;
-        else if (c.code === "PMC" && this.id === 13) base *= 0.95;
+        if (c.code === "PAG" && this.id === 15) base *= 0.85; // 15% reduction
+        else if (c.code === "PMC" && this.id === 13) base *= 0.85; // 15% reduction
         return base;
     }
 
@@ -184,15 +178,11 @@ const Packer = {
 
     calculateLayer: (pallet, variant) => {
         let checkHeight = pallet.currentHeight + variant.h;
-        if (checkHeight > pallet.config.max_height) {
-            // console.log(`CalcLayer fail: Height limit. Check: ${checkHeight}, Max: ${pallet.config.max_height}`);
-            return null;
-        }
+        if (checkHeight > pallet.config.max_height) return null;
 
         let fuselageW = pallet.getFuselageWidth(checkHeight);
         let availCross = Math.min(pallet.config.length_cross, fuselageW);
         let availLong = pallet.config.width_long;
-        // console.log(`CalcLayer: FuselageW=${fuselageW}, AvailCross=${availCross}, BoxL=${variant.l}, BoxW=${variant.w}`); // Verbose
 
         if (availCross < Math.min(variant.l, variant.w)) return null;
 
@@ -228,52 +218,16 @@ const Packer = {
         };
     },
 
-    packAircraft: (configCode, cargoItems, options = {}) => {
+    packAircraft: (configCode, cargoItems) => {
         const config = CONFIG.PALLET_OPTIONS[configCode];
-        const aircraftId = options.aircraftId || "UK75057";
-        const maxGrossLimit = CONFIG.AIRCRAFT_SPEC[aircraftId]?.max_gross_payload || 999999;
 
-        // Start with the tare weight of ALL pallets in the configuration
-        let currentTotalGross = config.count * config.tare_weight;
-
-        const mainDeckOnlyGlobal = options.mainDeckOnly || false;
-
-        // --- PRE-PROCESS: GROUP IDENTICAL ITEMS THEN SORT ---
-        // Group items with the exact same dimensions, weight, and priority so they can share layers on pallets efficiently
-        let groupedItemsMap = new Map();
-        
-        for (let i of cargoItems) {
-            if (i.count <= 0) continue;
-            let key = `${i.length}_${i.width}_${i.height}_${i.weight}_${i.priority || false}_${i.noStack || false}_${i.allowTipping || false}_${i.mainDeckOnly || false}`;
-            if (groupedItemsMap.has(key)) {
-                let existing = groupedItemsMap.get(key);
-                existing.count += i.count;
-                
-                // Track original names to provide a better label
-                if (!existing.originalNames) {
-                    existing.originalNames = [existing.name];
-                }
-                if (!existing.originalNames.includes(i.name)) {
-                    existing.originalNames.push(i.name);
-                }
-                
-                // Update display name based on grouping
-                if (existing.originalNames.length <= 3) {
-                    existing.name = existing.originalNames.join(", ");
-                } else {
-                    existing.name = `${existing.originalNames[0]} (+${existing.originalNames.length - 1} identical)`;
-                }
-            } else {
-                let newItem = { ...i };
-                newItem.originalNames = [i.name];
-                groupedItemsMap.set(key, newItem);
-            }
-        }
-        
-        let workingItems = Array.from(groupedItemsMap.values()).map(i => {
+        // --- PRE-PROCESS: SORT BY PRIORITY THEN FUSELAGE OPTIMIZATION ---
+        // 1. Map to CargoItem objects
+        // 2. Sort: High Priority (true) > Normal Priority (false)
+        // 3. Within same priority: No-Stack items last, then by volume descending
+        let workingItems = cargoItems.map(i => {
             const item = new CargoItem(i.id, i.name, i.length, i.width, i.height, i.weight, i.count, i.allowTipping, i.noStack);
             item.priority = i.priority || false;
-            item.mainDeckOnly = i.mainDeckOnly || false;
             return item;
         });
 
@@ -292,11 +246,8 @@ const Packer = {
         let pallets = [];
         for (let i = 1; i <= config.count; i++) {
             let p = new Pallet(i, config);
-
             while (true) {
                 if (workingItems.every(x => x.count === 0)) break;
-                if (currentTotalGross >= maxGrossLimit) break;
-
                 let bestLayer = null;
                 let itemToTake = null;
 
@@ -314,19 +265,10 @@ const Packer = {
                     }
                 }
                 if (!bestLayer) break;
-
                 let toTake = Math.min(bestLayer.count, itemToTake.count);
-
-                // Check against Pallet Max Net Weight
                 if (p.remainingWeight() < toTake * bestLayer.weight) {
                     toTake = Math.floor(p.remainingWeight() / itemToTake.weight);
                 }
-
-                // Check against Global Aircraft Max Gross Capacity
-                if (currentTotalGross + (toTake * bestLayer.weight) > maxGrossLimit) {
-                    toTake = Math.floor((maxGrossLimit - currentTotalGross) / bestLayer.weight);
-                }
-
                 if (toTake <= 0) break;
 
                 p.layers.push({
@@ -341,27 +283,26 @@ const Packer = {
                     dim_long: bestLayer.dim_long
                 });
                 p.currentWeight += toTake * bestLayer.weight;
-                currentTotalGross += toTake * bestLayer.weight;
                 p.currentHeight += bestLayer.height;
                 itemToTake.count -= toTake;
 
                 if (itemToTake.noStack) {
+                    // Close the pallet. This layer is the top layer.
+                    // We artificially set height to max to prevent further packing
                     p.currentHeight = p.config.max_height;
                 }
             }
             pallets.push(p);
         }
 
+        // --- STEP 2: PACK LOWER DECK SECOND ---
         let lowerDeckResults = [];
-        if (mainDeckOnlyGlobal) return { pallets, lowerDeck: lowerDeckResults, leftovers: workingItems.filter(i => i.count > 0) };
-
         for (let hold of CONFIG.LOWER_DECK) {
             let holdRes = { name: hold.name, current_weight: 0, compartments: [] };
             for (let comp of hold.compartments) {
-                let cData = { id: comp.id, name: comp.name, items: [], weight: 0, volume: 0, max_weight: comp.max_weight, max_volume: comp.max_volume, geo_used_ratio: 0 };
+                let cData = { id: comp.id, name: comp.name, items: [], weight: 0, volume: 0, max_weight: comp.max_weight, max_volume: comp.max_volume };
                 for (let item of workingItems) {
-                    if (item.count <= 0 || item.mainDeckOnly) continue;
-                    if (currentTotalGross >= maxGrossLimit) break;
+                    if (item.count <= 0) continue;
 
                     // Specific check for lower deck doors
                     let [i_min, i_mid] = item.dims;
@@ -375,6 +316,7 @@ const Packer = {
                     let itemLen, itemHeight;
 
                     if (item.allowTipping) {
+                        // Use the item's largest two dimensions for floor footprint if L/W, or H if tipped
                         itemLen = item.dims[1];
                         itemHeight = item.dims[0];
                         if (item.dims[2] <= comp.max_height_cm) {
@@ -382,8 +324,10 @@ const Packer = {
                             itemLen = item.dims[1];
                         }
                     } else {
+                        // Strict orientation (Height is Fixed)
                         itemHeight = item.originalDims[2];
                         let floorDims = [item.originalDims[0], item.originalDims[1]].sort((a, b) => a - b);
+                        // We can rotate on floor freely
                         itemLen = floorDims[1];
                     }
 
@@ -392,39 +336,10 @@ const Packer = {
                     }
 
                     let maxGeo = Math.floor(comp.max_length_cm / itemLen) * Math.floor(comp.max_height_cm / itemHeight);
-
-                    // --- HIGH FIDELITY LOWER DECK TAPER ---
-                    let c_hgt = comp.max_height_cm;
-                    let c_min_hgt = comp.min_height_cm || c_hgt;
-                    let len_limit_h = comp.max_length_cm;
-
-                    if (c_hgt > c_min_hgt) {
-                        if (itemHeight > c_min_hgt) {
-                            const POWER_H = 3.0;
-                            let ratio_h = Math.max(0.0, Math.min(1.0, (c_hgt - itemHeight) / (c_hgt - c_min_hgt)));
-                            len_limit_h = Math.floor(comp.max_length_cm * Math.pow(ratio_h, 1 / POWER_H));
-                        }
-                    }
-
-                    const c_wid_start = hold.floor_width_cm;
-                    const c_wid_end = hold.min_floor_width_cm || c_wid_start;
-                    let len_limit_w = comp.max_length_cm;
-
-                    const item_w_floor = item.allowTipping ? item.dims[0] : Math.min(item.originalDims[0], item.originalDims[1]);
-
-                    if (item_w_floor > c_wid_end) {
-                        const POWER_W = 4.0;
-                        let ratio_w = Math.max(0.0, Math.min(1.0, (c_wid_start - item_w_floor) / (c_wid_start - c_wid_end)));
-                        len_limit_w = Math.floor(comp.max_length_cm * Math.pow(ratio_w, 1 / POWER_W));
-                    }
-
-                    let eff_len = Math.min(len_limit_h, len_limit_w);
-                    let fit_l = Math.floor(eff_len / itemLen);
-
-                    let rows = Math.floor(c_wid_start / item_w_floor);
+                    // Assume hold width allows at least 2 rows if small
+                    let rows = Math.floor(hold.floor_width_cm / (item.allowTipping ? item.dims[0] : Math.min(item.originalDims[0], item.originalDims[1])));
                     if (rows < 1) rows = 1;
-
-                    maxGeo = fit_l * rows * Math.floor(c_hgt / itemHeight);
+                    maxGeo *= rows;
 
                     if (comp.obstacles) {
                         for (let obs of comp.obstacles) {
@@ -436,33 +351,25 @@ const Packer = {
                         }
                     }
 
-                    if (maxGeo <= 0) continue;
-                    let item_geo_ratio = 1.0 / maxGeo;
-
                     let currentInComp = 0;
-                    let remainingGeo = Math.floor(maxGeo * (1.0 - cData.geo_used_ratio));
-
-                    while (item.count > 0 && currentInComp < remainingGeo) {
+                    while (item.count > 0 && currentInComp < maxGeo) {
                         if (cData.weight + item.weight > comp.max_weight) break;
                         if (cData.volume + item.volumeM3 > comp.max_volume) break;
                         if (holdRes.current_weight + cData.weight + item.weight > hold.max_weight) break;
-                        if (currentTotalGross + item.weight > maxGrossLimit) break;
 
-                        let toTake = Math.min(item.count, remainingGeo - currentInComp);
+                        let toTake = Math.min(item.count, maxGeo - currentInComp);
                         let wTake = Math.floor((comp.max_weight - cData.weight) / item.weight);
                         toTake = Math.min(toTake, wTake);
-
-                        // Check Aircraft Limit
-                        let aircraftTake = Math.floor((maxGrossLimit - currentTotalGross) / item.weight);
-                        toTake = Math.min(toTake, aircraftTake);
 
                         if (toTake <= 0) break;
 
                         let existing = cData.items.find(i => i.name === item.name);
                         if (existing) existing.count += toTake;
                         else {
+                            // Determine dims used for packing
                             let widthOnFloor = item.dims.find(d => d !== itemLen && d !== itemHeight);
-                            if (widthOnFloor === undefined) widthOnFloor = item.dims[0];
+                            // If duplicates exist, this might fail logic, but simplified:
+                            if (widthOnFloor === undefined) widthOnFloor = item.dims[0]; // Fallback
 
                             cData.items.push({
                                 name: item.name,
@@ -474,9 +381,7 @@ const Packer = {
                         }
 
                         cData.weight += toTake * item.weight;
-                        currentTotalGross += toTake * item.weight;
                         cData.volume += toTake * item.volumeM3;
-                        cData.geo_used_ratio += toTake * item_geo_ratio;
                         item.count -= toTake;
                         currentInComp += toTake;
                     }
@@ -487,7 +392,7 @@ const Packer = {
             lowerDeckResults.push(holdRes);
         }
 
-        return { pallets, lowerDeck: lowerDeckResults, leftovers: workingItems.filter(i => i.count > 0), aircraftId, maxGrossLimit };
+        return { pallets, lowerDeck: lowerDeckResults, leftovers: workingItems.filter(i => i.count > 0) };
     }
 };
 

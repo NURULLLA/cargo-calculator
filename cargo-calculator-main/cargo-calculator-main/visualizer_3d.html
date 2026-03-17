@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Sky Guard Cargo Visualizer (Lower Deck - Fuselage View)</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: sans-serif;
+            background: #222;
+            color: white;
+        }
+
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            pointer-events: none;
+            text-shadow: 1px 1px 2px black;
+        }
+
+        #legend {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px;
+            border-radius: 8px;
+        }
+
+        .key-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+
+        .color-box {
+            width: 15px;
+            height: 15px;
+            margin-right: 8px;
+            border: 1px solid white;
+        }
+    </style>
+    <!-- Import Three.js via ES Modules -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+
+<body>
+    <div id="info">
+        <h1>Lower Deck Cargo Plan</h1>
+        <p>Verified Layout: C1(1) | C2(4) || C3(4) | C4(3)</p>
+    </div>
+    <div id="legend">
+        <div class="key-item">
+            <div class="color-box" style="background:rgba(255,255,255,0.1); border-color:#888;"></div>Fuselage Hull
+        </div>
+        <div class="key-item">
+            <div class="color-box" style="background:#ff3333;"></div>Obstacle (Structural Block)
+        </div>
+        <div class="key-item">
+            <div class="color-box" style="background:#33ff33;"></div>Cargo Box (120x100x100)
+        </div>
+    </div>
+
+    <!-- DATA LOADER -->
+    <script src="cargo_data.js"></script>
+    <script>
+        // Fallback
+        if (!window.CARGO_DATA) {
+            console.warn("No cargo_data.js found. Using verified defaults.");
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- CONFIG DATA ---
+        // Coordinates: X = Length, Y = Height, Z = Width
+        const COMPARTMENTS = [
+            {
+                id: "C1", name: "C1 (FWD)",
+                pos_x: - (295 + 560 + 50),
+                length: 295, width_floor: 120, width_top: 247, height: 108,
+                obstacles: [
+                    // Moving to Right Wall (Z+) based on user feedback "touching fuselage"
+                    // User requested "back" (end)
+                    // Added z_offset to push it against the slanted wall
+                    { l: 140, w: 72, h: 134, x_align: "end", z_align: "right", z_offset: 40, color: 0xff3333 }
+                ],
+                door: { w: 140, h: 108, x_offset: 0, z_side: 1 }, // Right side
+                boxes: 1,
+                box_type: { l: 100, w: 120, h: 100 }
+            },
+            {
+                id: "C2", name: "C2 (FWD)",
+                pos_x: - (560),
+                length: 560, width_floor: 120, width_top: 247, height: 108,
+                obstacles: [
+                    // User requested "close to C3" (end) and "corner" (right)
+                    { l: 97, w: 70, h: 27, y_align: "top", z_align: "right", x_align: "end", color: 0xff3333 }
+                ],
+                // Door shared with C1 usually, but let's visualize if specific
+                boxes: 4,
+                box_type: { l: 100, w: 120, h: 100 }
+            },
+            {
+                id: "C3", name: "C3 (AFT)",
+                pos_x: 100,
+                length: 440, width_floor: 120, width_top: 247, height: 112,
+                obstacles: [],
+                // Door removed from here
+                boxes: 4,
+                box_type: { l: 100, w: 120, h: 100 }
+            },
+            {
+                id: "C4", name: "C4 (AFT)",
+                pos_x: 100 + 440,
+                length: 608, width_floor: 120, width_top: 247, height: 112,
+                obstacles: [
+                    // Right Wall
+                    // User requested "close to C3" (start) not back
+                    // Kept z_offset to push against slanted wall
+                    { l: 238, w: 72, h: 134, x_align: "start", z_align: "right", z_offset: 40, color: 0xff3333 }
+                ],
+                // Door moved to C4, "next to" obstacle. 
+                // Obstacle at start (ends at -66). Door center approx 0.
+                door: { w: 140, h: 112, x_offset: 0, z_side: 1 },
+                boxes: 3,
+                box_type: { l: 100, w: 120, h: 100 }
+            }
+        ];
+
+        // --- DYNAMIC DATA OVERRIDE ---
+        if (window.CARGO_DATA && window.CARGO_DATA.lower_deck) {
+            console.log("Loading dynamic Lower Deck data...");
+            window.CARGO_DATA.lower_deck.forEach(d => {
+                const target = COMPARTMENTS.find(c => c.id === d.id);
+                if (target) {
+                    let totalBoxes = 0;
+                    d.items.forEach(item => {
+                        totalBoxes += item.count;
+                    });
+                    console.log(`Updated ${target.id}: ${target.boxes} -> ${totalBoxes} boxes`);
+                    target.boxes = totalBoxes;
+
+                    // Note: We don't update box_type currently (assumes standard verified size)
+                    // If mixed items, visualization assumes standard 100x120 blocks for count.
+                }
+            });
+        }
+
+        // --- SETUP SCENE ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x222222);
+        // Use fog to hide infinite void
+        scene.fog = new THREE.Fog(0x222222, 1000, 4000);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 10000);
+        camera.position.set(0, 1000, 2000);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        const ambLight = new THREE.AmbientLight(0xffffff, 0.7);
+        scene.add(ambLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.5);
+        dirLight.position.set(500, 1000, 500);
+        scene.add(dirLight);
+
+        const gridHelper = new THREE.GridHelper(4000, 40, 0x444444, 0x333333);
+        gridHelper.position.y = -50;
+        scene.add(gridHelper);
+
+        // --- HULL GEOMETRY FUNCTION ---
+        function createHullMesh(length, w_floor, w_top, height) {
+            // Draw trapezoid cross section centered at 0,0
+            const shape = new THREE.Shape();
+            // Start bottom left
+            shape.moveTo(-w_floor / 2, 0);
+            shape.lineTo(w_floor / 2, 0);   // Bottom Right
+            // Curve or Line to Top Right?
+            // User asked for "Tube". Let's use BezierCurve for smoother hull look?
+            // Bezier from (w_floor/2, 0) to (w_top/2, height). Control point outward?
+            // Simple trapezoid is safer for dimensions, but curve looks cool.
+            // Let's do a subtle curve.
+
+            // shape.lineTo(w_top/2, height); // Top Right
+            shape.bezierCurveTo(w_floor / 2 + 20, height * 0.3, w_top / 2, height * 0.8, w_top / 2, height);
+
+            shape.lineTo(-w_top / 2, height); // Top Left
+
+            // shape.lineTo(-w_floor/2, 0); // Back to start linear
+            shape.bezierCurveTo(-w_top / 2, height * 0.8, -w_floor / 2 - 20, height * 0.3, -w_floor / 2, 0);
+
+            // Extrude options
+            const extrudeSettings = {
+                steps: 2,
+                depth: length,
+                bevelEnabled: false
+            };
+
+            const geom = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+            // Extrude goes along Z by default. We want X.
+            // Rotate Geometry? Or Group?
+            // Extruding Shapes usually creates Volume along Z.
+            // We'll rotate the mesh later.
+
+            geom.center(); // Center the geometry
+            return geom;
+        }
+
+        // --- BUILD SCENE ---
+        COMPARTMENTS.forEach(comp => {
+            const group = new THREE.Group();
+            group.position.x = comp.pos_x + (comp.length / 2);
+            group.position.y = comp.height / 2;
+
+            // 1. Hull Mesh (Translucent)
+            const hullGeom = createHullMesh(comp.length, comp.width_floor, comp.width_top, comp.height);
+            // Hull is extruded along Z. We need it along X.
+            hullGeom.rotateY(Math.PI / 2); // Rotate 90 deg upon Y axis.
+
+            const hullMat = new THREE.MeshPhongMaterial({
+                color: 0x88aabb,
+                transparent: true,
+                opacity: 0.15,
+                side: THREE.DoubleSide,
+                shininess: 100,
+                wireframe: false
+            });
+            const hullMesh = new THREE.Mesh(hullGeom, hullMat);
+            group.add(hullMesh);
+
+            // 1b. Hull Wireframe (Ribs)
+            const wireGeo = new THREE.EdgesGeometry(hullGeom);
+            const wireMat = new THREE.LineBasicMaterial({ color: 0x88aabb, opacity: 0.5, transparent: true });
+            const wireMesh = new THREE.LineSegments(wireGeo, wireMat);
+            group.add(wireMesh);
+
+            // 2. Obstacles
+            comp.obstacles.forEach(obs => {
+                const obsGeom = new THREE.BoxGeometry(obs.l, obs.h, obs.w);
+                const obsMat = new THREE.MeshLambertMaterial({ color: obs.color || 0xff3333 }); // Solid Red
+                const obsMesh = new THREE.Mesh(obsGeom, obsMat);
+
+                let lx = 0, ly = 0, lz = 0;
+
+                // Alignments
+                if (obs.x_align === "end") lx = (comp.length / 2) - (obs.l / 2);
+                else if (obs.x_align === "start") lx = -(comp.length / 2) + (obs.l / 2);
+                else lx = -(comp.length / 2) + (obs.l / 2);
+
+                if (obs.y_align === "top") ly = (comp.height / 2) - (obs.h / 2);
+                else ly = -(comp.height / 2) + (obs.h / 2);
+
+                if (obs.z_align === "right") {
+                    // Push to Right Wall (Z+)
+                    // Floor Width 120. Wall at 60.
+                    // Center of obs (w) needs to be at 60 - w/2.
+                    lz = (120 / 2) - (obs.w / 2);
+                } else if (obs.z_align === "left") {
+                    lz = -(120 / 2) + (obs.w / 2);
+                } else {
+                    lz = 0;
+                }
+
+                // Manual Z adjustment for fuselage curve
+                if (obs.z_offset) lz += obs.z_offset;
+
+                obsMesh.position.set(lx, ly, lz);
+
+                // Edges
+                const e = new THREE.EdgesGeometry(obsGeom);
+                const l = new THREE.LineSegments(e, new THREE.LineBasicMaterial({ color: 0x550000 }));
+                obsMesh.add(l);
+
+                group.add(obsMesh);
+            });
+
+            // 3. Doors (Yellow)
+            if (comp.door) {
+                const d = comp.door;
+                const dGeom = new THREE.PlaneGeometry(d.w, d.h);
+                const dMat = new THREE.MeshBasicMaterial({ color: 0xffff00, side: THREE.DoubleSide, transparent: true, opacity: 0.3 });
+                const dMesh = new THREE.Mesh(dGeom, dMat);
+
+                // Position on Side Wall
+                // Z = 60 (Right) or -60 (Left)
+                const zPos = d.z_side * (120 / 2); // 60
+                dMesh.position.set(d.x_offset, 0, zPos);
+
+                // Rotate to align with Side Wall (Plane is XY, we want it parallel to X axis)
+                // Default Normal is Z.
+                // If Z_side is 1 (Right), we want it at Z=60. 
+                // Creating it in XY puts it at Z=0 facing Z.
+                // We just move it to Z=60. 
+                // Rotation Y=0 means it faces Z. 
+                // If we want it "On the wall", it IS in the XY plane (shifted Z).
+                // But we might want it to face "Inward" (-Z)?
+                // Let's face Inward: Rotation Y = PI.
+
+                dMesh.rotation.y = (d.z_side === 1) ? Math.PI : 0;
+
+                // Frame
+                const dFrame = new THREE.LineSegments(new THREE.EdgesGeometry(dGeom), new THREE.LineBasicMaterial({ color: 0xffff00 }));
+                dMesh.add(dFrame);
+
+                group.add(dMesh);
+            }
+
+            // 4. Boxes
+            let startX = -(comp.length / 2);
+            let currentX = startX;
+            // Removed old offsets for C1/C2 (obstacles are at END now)
+            // Added offset for C4 (obstacle is at START now)
+            if (comp.id === "C4") currentX += 238; // Obstacle Length 238
+
+            const gap = 5;
+            for (let i = 0; i < comp.boxes; i++) {
+                const b = comp.box_type;
+                const boxGeom = new THREE.BoxGeometry(b.l, b.h, b.w);
+                const boxMat = new THREE.MeshLambertMaterial({ color: 0x33ff33 });
+                const boxMesh = new THREE.Mesh(boxGeom, boxMat);
+
+                boxMesh.position.set(currentX + (b.l / 2), -(comp.height / 2) + (b.h / 2), 0);
+
+                const boxEdge = new THREE.EdgesGeometry(boxGeom);
+                const boxLine = new THREE.LineSegments(boxEdge, new THREE.LineBasicMaterial({ color: 0x005500 }));
+                boxMesh.add(boxLine);
+
+                group.add(boxMesh);
+                currentX += b.l + gap;
+            }
+
+            // Label
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = 256; canvas.height = 128; // Power of 2
+            ctx.fillStyle = "rgba(255, 255, 255, 0)";
+            ctx.clearRect(0, 0, 256, 128);
+            ctx.fillStyle = "#aaccff";
+            ctx.font = "bold 40px Arial";
+            ctx.textAlign = "center";
+            ctx.fillText(comp.name, 128, 50);
+            ctx.fillStyle = "white";
+            ctx.font = "30px Arial";
+            ctx.fillText(`${comp.boxes} Boxes`, 128, 90);
+
+            const tex = new THREE.CanvasTexture(canvas);
+            const spriteMat = new THREE.SpriteMaterial({ map: tex });
+            const sprite = new THREE.Sprite(spriteMat);
+            sprite.position.set(0, comp.height / 2 + 60, 0);
+            sprite.scale.set(200, 100, 1);
+            group.add(sprite);
+
+            scene.add(group);
+        });
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+
+</html>

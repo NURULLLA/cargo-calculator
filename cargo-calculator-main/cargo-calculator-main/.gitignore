@@ -1,0 +1,28 @@
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Logs
+*.log
+npm-debug.log*
+
+# Runtime data
+pid
+*.pid
+*.seed
+*.pid.lock
+
+# Editor directories and files
+.idea
+.vscode
+*.swp
+*.swo
+
+# Verification scripts (optional, if you want to exclude them)
+# verify_*.py
+# test_*.mjs

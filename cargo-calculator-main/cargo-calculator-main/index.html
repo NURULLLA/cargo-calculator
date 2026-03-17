@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SkyGuard | Cargo Optimizer</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=2">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script type="importmap">
         {
@@ -15,7 +15,6 @@
             }
         }
     </script>
-    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 </head>
 
 <body class="dark-theme">
@@ -54,10 +53,6 @@
                     <p id="tab-subtitle">Define batch dimensions and quantities</p>
                 </div>
                 <div class="header-actions">
-                    <select id="aircraft-select" class="btn-secondary" title="Select Aircraft">
-                        <option value="UK75057">UK75057 (Net Max: 34,863–34,953 kg)</option>
-                        <option value="UK75058">UK75058 (Net Max: 34,168–34,258 kg)</option>
-                    </select>
                     <select id="config-select" class="btn-secondary" title="Select Aircraft Configuration">
                         <option value="PAG">B757-200 (15x PAG)</option>
                         <option value="PMC">B757-200 (13x PMC)</option>
@@ -109,20 +104,7 @@
                                 <label><input type="checkbox" id="item-priority"> <i class="fas fa-star"
                                         style="color:#fbbf24;"></i> High Priority</label>
                             </div>
-                            <div class="input-group checkbox separator-top">
-                                <label class="checkbox-label">
-                                    <input type="checkbox" id="main-deck-only">
-                                    <strong>Main Deck Only Loading</strong>
-                                </label>
-                            </div>
-                            <div class="btn-group">
-                                <button id="btn-add-item" class="btn-success">Add to List</button>
-                                <button id="btn-import-excel" class="btn-secondary">
-                                    <i class="fas fa-file-excel"></i> Import Excel
-                                </button>
-                                <input type="file" id="excel-upload" accept=".xlsx, .xls" style="display: none;">
-                            </div>
-                            <div id="import-status" class="import-status"></div>
+                            <button id="btn-add-item" class="btn-success">Add to List</button>
                         </div>
                     </div>
 
@@ -211,7 +193,7 @@
     <!-- Notification system -->
     <div id="toast-container"></div>
 
-    <script type="module" src="app.js?v=2.3"></script>
+    <script type="module" src="app.js?v=2"></script>
 </body>
 
 </html>
