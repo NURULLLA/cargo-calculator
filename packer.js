@@ -116,6 +116,7 @@ class CargoItem {
         } else {
             this.noStack = false;
         }
+        this.lowerDeckOnly = false; // Will be set by PackAircraft from input
         this.volumeM3 = (length * width * height) / 1000000.0;
     }
 
@@ -244,7 +245,7 @@ const Packer = {
         
         for (let i of cargoItems) {
             if (i.count <= 0) continue;
-            let key = `${i.length}_${i.width}_${i.height}_${i.weight}_${i.priority || false}_${i.noStack || false}_${i.allowTipping || false}_${i.mainDeckOnly || false}`;
+            let key = `${i.length}_${i.width}_${i.height}_${i.weight}_${i.priority || false}_${i.noStack || false}_${i.allowTipping || false}_${i.mainDeckOnly || false}_${i.lowerDeckOnly || false}`;
             if (groupedItemsMap.has(key)) {
                 let existing = groupedItemsMap.get(key);
                 existing.count += i.count;
@@ -274,6 +275,7 @@ const Packer = {
             const item = new CargoItem(i.id, i.name, i.length, i.width, i.height, i.weight, i.count, i.allowTipping, i.noStack);
             item.priority = i.priority || false;
             item.mainDeckOnly = i.mainDeckOnly || false;
+            item.lowerDeckOnly = i.lowerDeckOnly || false;
             return item;
         });
 
@@ -299,9 +301,9 @@ const Packer = {
 
                 let bestLayer = null;
                 let itemToTake = null;
-
                 for (let item of workingItems) {
                     if (item.count <= 0) continue;
+                    if (item.lowerDeckOnly) continue; // Skip items that MUST go to lower deck
                     if (!Packer.fitsThroughDoor(item, CONFIG.DOOR_MAIN)) {
                         continue;
                     }
