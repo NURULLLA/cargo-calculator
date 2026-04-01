@@ -1,7 +1,7 @@
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+// import * as THREE from 'three';
+// import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-export class MainDeckViz {
+class MainDeckViz {
     constructor(containerId) {
         this.container = document.getElementById(containerId);
         this.scene = null;
@@ -9,6 +9,7 @@ export class MainDeckViz {
         this.renderer = null;
         this.controls = null;
 
+        // Note: Global THREE and OrbitControls (via window.THREE.OrbitControls) should be available
         this.init();
     }
 
@@ -26,7 +27,7 @@ export class MainDeckViz {
         this.renderer.setSize(width, height);
         this.container.appendChild(this.renderer.domElement);
 
-        this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+        this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = true;
 
         this.scene.add(new THREE.AmbientLight(0xffffff, 0.9));

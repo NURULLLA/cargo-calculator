@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Boeing 757 Freighter – чистая визуализация + редактирование</title>
+    <style>
+        :root {
+            --bg-deep: #0f172a;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --accent-primary: #38bdf8;
+            --accent-secondary: #f472b6;
+            --text-main: #f1f5f9;
+            --text-dim: #94a3b8;
+            --border: rgba(255, 255, 255, 0.1);
+            --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+        * { box-sizing: border-box; }
+        body {
+            background: var(--bg-deep);
+            background-image: radial-gradient(circle at 10% 20%, rgba(2, 132, 199, 0.1) 0%, transparent 40%),
+                              radial-gradient(circle at 90% 80%, rgba(131, 24, 67, 0.05) 0%, transparent 40%);
+            font-family: 'Outfit', 'Inter', system-ui, -apple-system, sans-serif;
+            color: var(--text-main);
+            margin: 0;
+            padding: 24px;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: var(--card-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--border);
+            border-radius: 2rem;
+            padding: 2rem;
+            box-shadow: var(--glass-shadow);
+        }
+        h1 {
+            font-size: 2rem;
+            margin: 0 0 0.5rem;
+            font-weight: 700;
+            letter-spacing: -0.025em;
+            background: linear-gradient(to right, #bae6fd, #e0f2fe);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        h1 small {
+            font-size: 0.9rem;
+            background: rgba(56, 189, 248, 0.1);
+            padding: 6px 16px;
+            border-radius: 100px;
+            color: var(--accent-primary);
+            border: 1px solid rgba(56, 189, 248, 0.2);
+            -webkit-text-fill-color: initial;
+        }
+        .sub {
+            color: var(--text-dim);
+            margin-bottom: 2rem;
+            border-left: 4px solid var(--accent-primary);
+            padding-left: 1.25rem;
+            font-size: 1rem;
+            line-height: 1.6;
+        }
+        .flex-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 2rem;
+        }
+        .panel {
+            background: rgba(15, 23, 42, 0.5);
+            border: 1px solid var(--border);
+            border-radius: 1.5rem;
+            padding: 1.5rem;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .panel:hover {
+            box-shadow: 0 12px 40px rgba(0,0,0,0.2);
+        }
+        .side-view { flex: 2; min-width: 320px; }
+        .controls { flex: 1; min-width: 300px; display: flex; flex-direction: column; gap: 1.25rem; }
+        .cross-section { margin-top: 2rem; }
+        
+        canvas {
+            display: block;
+            width: 100%;
+            background: #000000;
+            border-radius: 1rem;
+            border: 1px solid var(--border);
+            cursor: crosshair;
+        }
+        #sideCanvas { aspect-ratio: 800 / 220; }
+        #sectionCanvas { aspect-ratio: 800 / 550; }
+        
+        .pallet-info {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border);
+            border-radius: 1.25rem;
+            padding: 1.25rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        .info-label { color: var(--text-dim); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; }
+        .info-value { font-weight: 600; font-size: 1.1rem; color: var(--accent-primary); }
+        
+        .button-group { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+        button {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border);
+            padding: 10px 20px;
+            border-radius: 12px;
+            font-weight: 600;
+            color: var(--text-main);
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.85rem;
+        }
+        button:hover { background: rgba(255,255,255,0.1); border-color: var(--accent-primary); }
+        button.active { background: var(--accent-primary); color: var(--bg-deep); border-color: var(--accent-primary); }
+        button.warning { background: var(--accent-secondary); border-color: var(--accent-secondary); color: white; }
+        button.preview-active { background: #10b981; border-color: #10b981; color: white; }
+        
+        input {
+            background: rgba(0,0,0,0.2);
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            padding: 8px;
+            border-radius: 8px;
+            width: 80px;
+            text-align: center;
+        }
+        input:focus { outline: none; border-color: var(--accent-primary); }
+        
+        .points-table-container {
+            margin-top: 1rem;
+            max-height: 250px;
+            overflow-y: auto;
+            border-radius: 1rem;
+            border: 1px solid var(--border);
+        }
+        .point-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr 50px;
+            gap: 12px;
+            padding: 8px 16px;
+            border-bottom: 1px solid var(--border);
+            align-items: center;
+        }
+        .point-row.header {
+            background: rgba(255,255,255,0.05);
+            font-weight: 600;
+            position: sticky; top: 0;
+            color: var(--text-dim);
+            font-size: 0.8rem;
+        }
+        .coord-status { font-size: 0.75rem; color: var(--text-dim); margin-top: 12px; display: flex; align-items: center; gap: 8px; }
+
+        hr { margin: 10px 0; }
+
+        @media print {
+            @page { size: landscape; margin: 10mm; }
+            body { 
+                background: #0f172a !important; 
+                -webkit-print-color-adjust: exact !important; 
+                print-color-adjust: exact !important;
+                padding: 0;
+            }
+            .controls, .points-table-container, .coord-status, .sub, button, hr, .button-group { 
+                display: none !important; 
+            }
+            .side-view { flex: 100% !important; margin-bottom: 2rem; }
+            .container { 
+                box-shadow: none !important; 
+                border: none !important; 
+                max-width: 100% !important; 
+                padding: 0 !important;
+            }
+            #sectionCanvas, #sideCanvas { 
+                background: #050505 !important; 
+                border-color: #333 !important;
+            }
+            h1 { font-size: 2.2rem !important; margin-bottom: 1.5rem !important; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>✈️ Boeing 757 Freighter <small>Main Deck Analysis</small></h1>
+    <div class="sub">
+        📐 <strong>Technical Cross-Section:</strong> Floor width 317 cm, max width 301 cm at 130 cm height.<br>
+        The profile is centered and symmetrical. Adjust cargo width to calculate maximum allowable height.<br>
+        <span style="color: #10b981;">✨ Preview Mode hides all control points and restriction lines — clean fuselage contour only.</span>
+    </div>
+
+    <div class="flex-row">
+        <div class="side-view panel">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <span><strong>📦 Fuselage Side Projection</strong></span>
+                <div class="button-group">
+                    <button id="btnPMC" class="active">PMC (13)</button>
+                    <button id="btnPAG">PAG (15)</button>
+                </div>
+            </div>
+            <canvas id="sideCanvas" width="800" height="200"></canvas>
+            <div class="coord-status"><span>🖱️</span> Select a pallet to analyze its cross-section</div>
+        </div>
+        <div class="controls panel">
+            <div><strong>📋 Active Configuration</strong></div>
+            <div class="pallet-info" id="palletInfo">
+                <div>
+                    <div class="info-label">Position</div>
+                    <div class="info-value" id="posNumber">—</div>
+                </div>
+                <div>
+                    <div class="info-label">Type</div>
+                    <div class="info-value" id="posType">—</div>
+                </div>
+                <div>
+                    <div class="info-label">Cargo Width (cm)</div>
+                    <input type="number" id="cargoWidth" value="301" step="0.1">
+                </div>
+                <div>
+                    <div class="info-label">Max Height</div>
+                    <div class="info-value"><span id="maxHeight">—</span> cm</div>
+                </div>
+                <div>
+                    <div class="info-label">Useful Area (LxW)</div>
+                    <div class="info-value"><span id="usefulArea">—</span> cm</div>
+                </div>
+                <button id="fitProfileBtn" class="warning" style="margin-top:0.5rem; width: 100%;">🔧 Reset to Measured Pos Profile</button>
+            </div>
+            <div class="button-group" style="margin-top: auto;">
+                <button id="previewModeBtn" style="background: #10b981; border-color: #10b981;">🔍 Preview Mode (Clean)</button>
+                <button id="savePdfBtn" class="warning" style="flex: 100%;">🖨️ Save view as PDF / Print</button>
+                <button id="exportPointsBtn">📎 Export JSON</button>
+                <button id="copyPointsBtn">📋 Copy Points</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="cross-section panel">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+            <span><strong>📐 Central Cross-Section</strong> (<span id="activeZoneLabel">MIDDLE</span>)</span>
+            <button id="resetSectionBtn">↺ Reset to Measured Data</button>
+        </div>
+        <canvas id="sectionCanvas" width="800" height="500"></canvas>
+        <div class="coord-status"><span>✏️</span> Click the chart to add points; use the table below for precise geometry control. (Preview Mode hides points)</div>
+        <div id="pointsTable" class="points-table-container"></div>
+    </div>
+
+</div>
+
+<script>
+    (function(){
+        // ------------------- ПРОФИЛИ СЕЧЕНИЯ -------------------
+        const FACTORY_PROFILES = {
+            NOSE: [
+                [205, 140], [200, 160], [195, 180], [190, 195], [185, 210], [180, 220], [175, 230], [170, 240], [165, 245], [160, 250], [155, 260], [150, 265], [145, 270], [140, 275], [135, 285], [120, 301], [0, 317]
+            ],
+            MIDDLE: [
+                [205, 185], [200, 200], [195, 215], [190, 225], [185, 235], [180, 245], [175, 255], [170, 260], [165, 275], [140, 301], [0, 317]
+            ],
+            TAIL: [
+                [205, 140], [200, 150], [195, 170], [190, 185], [185, 195], [180, 205], [175, 215], [170, 225], [165, 235], [160, 240], [155, 250], [150, 255], [145, 265], [140, 275], [135, 285], [120, 301], [0, 317]
+            ]
+        };
+
+        const USER_PROFILES = {
+            NOSE: FACTORY_PROFILES.NOSE.map(([h, fullW]) => ({ h, w: fullW / 2 })),
+            MIDDLE: FACTORY_PROFILES.MIDDLE.map(([h, fullW]) => ({ h, w: fullW / 2 })),
+            TAIL: FACTORY_PROFILES.TAIL.map(([h, fullW]) => ({ h, w: fullW / 2 }))
+        };
+
+        let sectionPoints = [];   // Reference to the active zone's array in USER_PROFILES
+        let activeZone = 'MIDDLE';
+        let previewMode = false;   // NEW: clean preview mode (no points, no restriction line)
+
+        function getZoneForPosition(type, id) {
+            if (id === 1) return 'NOSE';
+            if (type === 'PMC' && id === 13) return 'TAIL';
+            if (type === 'PAG' && id === 15) return 'TAIL';
+            return 'MIDDLE';
+        }
+
+        function loadDefaultSection() { /* not used directly */ }
+
+        // ------------------- ПАЛЛЕТЫ -------------------
+        let currentPalletType = 'PMC';
+        let selectedPalletIndex = 0;
+        let pallets = [];
+
+        function buildPallets(type) {
+            const count = (type === 'PMC') ? 13 : 15;
+            const arr = [];
+            for(let i=0; i<count; i++) {
+                arr.push({ id: i+1, cargoWidth: 301 });
+            }
+            return arr;
+        }
+
+        function switchPalletType(type) {
+            currentPalletType = type;
+            const newList = buildPallets(type);
+            for(let i=0; i<Math.min(pallets.length, newList.length); i++) {
+                newList[i].cargoWidth = pallets[i]?.cargoWidth || newList[i].cargoWidth;
+            }
+            pallets = newList;
+            if(selectedPalletIndex >= pallets.length) selectedPalletIndex = pallets.length-1;
+            if(selectedPalletIndex < 0) selectedPalletIndex = 0;
+            updateSelectedPalletInfo();
+            drawSideView();
+            drawSection();
+        }
+
+        // ------------------- РАСЧЁТ МАКСИМАЛЬНОЙ ВЫСОТЫ -------------------
+        function getMaxHeightForWidth(widthCm) {
+            if(sectionPoints.length === 0) return 0;
+            const halfWidth = widthCm / 2;
+            const sorted = [...sectionPoints].sort((a,b)=>a.h-b.h);
+            
+            // Find the highest point where the fuselage is wide enough
+            let maxH = 0;
+            for(let i=0; i<sorted.length; i++) {
+                const p1 = sorted[i];
+                if (p1.w >= halfWidth) {
+                    maxH = p1.h;
+                } else if (i > 0) {
+                    const p0 = sorted[i-1];
+                    if (p0.w >= halfWidth) {
+                        // Interpolate height where width matches halfWidth
+                        const t = (halfWidth - p0.w) / (p1.w - p0.w);
+                        const interH = p0.h + t * (p1.h - p0.h);
+                        maxH = Math.max(maxH, interH);
+                    }
+                    break; 
+                }
+            }
+            return Math.min(maxH, 210); // Cap at max ceiling height
+        }
+
+
+        function updateSelectedPalletInfo() {
+            const pallet = pallets[selectedPalletIndex];
+            if(!pallet) return;
+            
+            // Auto-load profile for position
+            activeZone = getZoneForPosition(currentPalletType, pallet.id);
+            sectionPoints = USER_PROFILES[activeZone];
+            sectionPoints.sort((a,b)=>a.h-b.h);
+            updateSectionBounds();
+            
+            const label = document.getElementById('activeZoneLabel');
+            if (label) label.innerText = activeZone + " ZONE";
+            
+            document.getElementById('posNumber').innerText = pallet.id;
+            document.getElementById('posType').innerText = currentPalletType;
+            const widthInput = document.getElementById('cargoWidth');
+            widthInput.value = pallet.cargoWidth.toFixed(1);
+            const maxH = getMaxHeightForWidth(pallet.cargoWidth);
+            document.getElementById('maxHeight').innerText = maxH.toFixed(1);
+
+            const cargoL = (currentPalletType === 'PMC') ? 235 : 215;
+            document.getElementById('usefulArea').innerText = `${cargoL} x 301`;
+
+            drawSection();
+            renderPointsTable();
+        }
+
+        function setSelectedCargoWidth(w) {
+            if(pallets[selectedPalletIndex]) {
+                pallets[selectedPalletIndex].cargoWidth = Math.max(0, w);
+                updateSelectedPalletInfo();
+                drawSideView();
+                drawSection();
+            }
+        }
+
+        document.getElementById('cargoWidth').addEventListener('change', (e) => {
+            let val = parseFloat(e.target.value);
+            if(isNaN(val)) val = 301;
+            val = Math.min(500, Math.max(0, val));
+            setSelectedCargoWidth(val);
+        });
+
+        document.getElementById('fitProfileBtn').addEventListener('click', () => {
+            USER_PROFILES[activeZone] = FACTORY_PROFILES[activeZone].map(([h, w]) => ({ h, w: w / 2 }));
+            updateSelectedPalletInfo();
+            drawSideView();
+        });
+
+
+        // ------------------- ОТРИСОВКА БОКОВОЙ ПРОЕКЦИИ -------------------
+        const sideCanvas = document.getElementById('sideCanvas');
+        let sideCtx = sideCanvas.getContext('2d');
+
+        function drawSideView() {
+            if(!sideCanvas || !sideCtx) return;
+            const w = sideCanvas.clientWidth;
+            const h = sideCanvas.clientHeight;
+            if (w === 0 || h === 0) return;
+            const dpr = window.devicePixelRatio || 2;
+            sideCanvas.width = w * dpr;
+            sideCanvas.height = h * dpr;
+            sideCtx.resetTransform();
+            sideCtx.scale(dpr, dpr);
+            sideCtx.clearRect(0,0,w,h);
+
+            const count = pallets.length;
+            if(count === 0) return;
+
+            const margin = { left: 60, right: 40, top: 20, bottom: 30 };
+            const plotWidth = w - margin.left - margin.right;
+            const plotHeight = h - margin.top - margin.bottom;
+            const palletWidthPx = plotWidth / count;
+
+            sideCtx.fillStyle = "#f0f4f8";
+            sideCtx.fillRect(margin.left, margin.top, plotWidth, plotHeight);
+            sideCtx.strokeStyle = "#a0b8cc";
+            sideCtx.strokeRect(margin.left, margin.top, plotWidth, plotHeight);
+
+            sideCtx.fillStyle = "#2c5a74";
+            sideCtx.font = "10px sans-serif";
+            sideCtx.fillText("нос", margin.left-20, margin.top+plotHeight/2);
+            sideCtx.fillText("хвост", margin.left+plotWidth+5, margin.top+plotHeight/2);
+
+            for(let i=0; i<count; i++) {
+                const x = margin.left + i * palletWidthPx;
+                const y = margin.top;
+                const pallet = pallets[i];
+                sideCtx.fillStyle = (i === selectedPalletIndex) ? "#ffb347" : "#7fbcb9";
+                sideCtx.fillRect(x, y, palletWidthPx-1, plotHeight);
+                sideCtx.strokeStyle = "#2c5a74";
+                sideCtx.strokeRect(x, y, palletWidthPx-1, plotHeight);
+                sideCtx.fillStyle = "#1e2a32";
+                sideCtx.font = "bold 11px sans-serif";
+                sideCtx.fillText(pallet.id, x+5, y+18);
+                if(Math.abs(pallet.cargoWidth - 301) > 1) {
+                    sideCtx.font = "9px monospace";
+                    sideCtx.fillStyle = "#b94e0e";
+                    sideCtx.fillText(`${pallet.cargoWidth.toFixed(0)}см`, x+5, y+35);
+                }
+            }
+        }
+
+        sideCanvas.addEventListener('click', (e) => {
+            const rect = sideCanvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+
+            const count = pallets.length;
+            const margin = { left: 60, right: 40, top: 20, bottom: 30 };
+            const plotWidth = sideCanvas.clientWidth - margin.left - margin.right;
+            const palletWidthPx = plotWidth / count;
+            if(mx >= margin.left && mx <= margin.left+plotWidth && my >= margin.top && my <= sideCanvas.clientHeight-margin.bottom) {
+                const idx = Math.floor((mx - margin.left) / palletWidthPx);
+                if(idx >=0 && idx < count) {
+                    selectedPalletIndex = idx;
+                    updateSelectedPalletInfo();
+                    drawSideView();
+                    drawSection();
+                }
+            }
+        });
+
+        // ------------------- ОТРИСОВКА ПОПЕРЕЧНОГО СЕЧЕНИЯ (ИСПРАВЛЕННАЯ + ПРЕВЬЮ) -------------------
+        const sectionCanvas = document.getElementById('sectionCanvas');
+        let sectCtx = sectionCanvas.getContext('2d');
+        let viewHmax = 210, viewWmax = 180;
+
+        function updateSectionBounds() {
+            if(sectionPoints.length === 0) { viewHmax=210; viewWmax=180; return; }
+            let maxH=0, maxW=0;
+            for(let p of sectionPoints) {
+                if(p.h > maxH) maxH = p.h;
+                if(p.w > maxW) maxW = p.w;
+            }
+            // Add padding
+            viewHmax = Math.max(maxH + 10, 210);
+            viewWmax = Math.max(maxW + 40, 180);
+        }
+
+
+        function realToCanvas(h, w, cw, ch) {
+            const ml=60, mr=60, mt=40, mb=50;
+            const pw = cw - ml - mr;
+            const ph = ch - mt - mb;
+            const centerX = ml + pw / 2;
+            
+            // w=0 - центр фюзеляжа (centerX)
+            let x = centerX + (w / viewWmax) * (pw / 2);
+            let y = mt + ((viewHmax - h) / viewHmax) * ph;
+            return {x,y};
+        }
+
+        function canvasToReal(px, py, cw, ch) {
+            const ml=60, mr=60, mt=40, mb=50;
+            const pw = cw - ml - mr;
+            const ph = ch - mt - mb;
+            const centerX = ml + pw/2;
+            
+            let w = (px - centerX) / (pw / 2) * viewWmax;
+            let h = viewHmax - ((py - mt) / ph * viewHmax);
+            return {h: Math.max(0, Math.min(h, viewHmax)), w: Math.max(0, Math.min(w, viewWmax))};
+        }
+
+
+        function interpolateSmooth(points, seg=20) {
+            if(points.length < 2) return points;
+            const sorted = [...points].sort((a,b)=>a.h-b.h);
+            const extended = [sorted[0], ...sorted, sorted[sorted.length-1]];
+            const result = [];
+            for(let i=0; i<extended.length-3; i++) {
+                const p0=extended[i], p1=extended[i+1], p2=extended[i+2], p3=extended[i+3];
+                for(let s=0; s<=seg; s++) {
+                    const t = s/seg;
+                    const t2=t*t, t3=t2*t;
+                    let h = 0.5*((2*p1.h)+(-p0.h+p2.h)*t+(2*p0.h-5*p1.h+4*p2.h-p3.h)*t2+(-p0.h+3*p1.h-3*p2.h+p3.h)*t3);
+                    let w = 0.5*((2*p1.w)+(-p0.w+p2.w)*t+(2*p0.w-5*p1.w+4*p2.w-p3.w)*t2+(-p0.w+3*p1.w-3*p2.w+p3.w)*t3);
+                    
+                    // Clamping and safety
+                    h = Math.max(sorted[0].h, Math.min(h, sorted[sorted.length-1].h));
+                    w = Math.max(0, w); 
+                    result.push({h, w});
+                }
+            }
+            return result.filter((v,i,a)=>i===0 || Math.abs(v.h-a[i-1].h)>0.1);
+        }
+
+
+        function drawSection() {
+            if(!sectCtx) return;
+            const cw = sectionCanvas.clientWidth;
+            const ch = sectionCanvas.clientHeight;
+            if(cw === 0 || ch === 0) return;
+            const dpr = window.devicePixelRatio || 2;
+            sectionCanvas.width = cw * dpr;
+            sectionCanvas.height = ch * dpr;
+            sectCtx.resetTransform();
+            sectCtx.scale(dpr, dpr);
+            sectCtx.clearRect(0,0,cw,ch);
+
+            const ml=60, mr=60, mt=40, mb=50;
+            const pw = cw - ml - mr;
+            const ph = ch - mt - mb;
+            const centerX = ml + pw / 2;
+
+            // DRAW CENTERED GRID
+            sectCtx.save();
+            sectCtx.strokeStyle = "rgba(148, 163, 184, 0.25)";
+            sectCtx.lineWidth = 1;
+            
+            // Vertical lines (Symmetrical width)
+            for(let w = -viewWmax; w <= viewWmax; w += 20) {
+                let x = centerX + (w / viewWmax) * (pw / 2);
+                if (x < ml - 1 || x > cw - mr + 1) continue;
+                
+                sectCtx.beginPath();
+                sectCtx.strokeStyle = (w === 0) ? "rgba(148, 163, 184, 0.6)" : "rgba(148, 163, 184, 0.2)";
+                sectCtx.moveTo(x, mt);
+                sectCtx.lineTo(x, ch - mb);
+                sectCtx.stroke();
+                
+                if (w % 40 === 0 && !previewMode) {
+                    sectCtx.fillStyle = "#94a3b8";
+                    sectCtx.font = "10px monospace";
+                    sectCtx.textAlign = "center";
+                    sectCtx.fillText(Math.abs(w), x, ch - mb + 15);
+                }
+            }
+
+
+            // Horizontal lines (Height)
+            for(let h = 0; h <= viewHmax; h += 10) {
+                let y = mt + ((viewHmax - h) / viewHmax) * ph;
+                sectCtx.beginPath();
+                sectCtx.strokeStyle = (h % 50 === 0) ? "rgba(148, 163, 184, 0.5)" : "rgba(148, 163, 184, 0.15)";
+                sectCtx.moveTo(ml, y);
+                sectCtx.lineTo(cw - mr, y);
+                sectCtx.stroke();
+                
+                if (h % 10 === 0 && !previewMode) {
+                    sectCtx.textAlign = "right";
+                    sectCtx.fillStyle = (h % 50 === 0) ? "#fbbf24" : "#94a3b8"; 
+                    sectCtx.font = (h % 50 === 0) ? "bold 10px monospace" : "9px monospace";
+                    sectCtx.fillText(h, ml - 10, y + 4);
+                }
+            }
+            sectCtx.restore();
+
+            // Labels (always visible)
+            sectCtx.fillStyle = "#38bdf8";
+            sectCtx.font = "12px sans-serif";
+            sectCtx.textAlign = "center";
+            sectCtx.fillText("Half-Width (cm)", centerX, ch - 10);
+            
+            sectCtx.save();
+            sectCtx.translate(15, mt + ph / 2);
+            sectCtx.rotate(-Math.PI / 2);
+            sectCtx.fillText("Height from Floor (cm)", 0, 0);
+            sectCtx.restore();
+
+            if(sectionPoints.length === 0) return;
+            const sorted = [...sectionPoints].sort((a,b)=>a.h-b.h);
+            const smooth = interpolateSmooth(sorted, 30);
+
+            if(smooth.length > 1) {
+                // Main Profile Rendering
+                sectCtx.beginPath();
+                sectCtx.lineWidth = 4;
+                sectCtx.strokeStyle = "#0ea5e9";
+                
+                // Right Half
+                for(let i = 0; i < smooth.length; i++) {
+                    let {x, y} = realToCanvas(smooth[i].h, smooth[i].w, cw, ch);
+                    if(i === 0) sectCtx.moveTo(x, y); else sectCtx.lineTo(x, y);
+                }
+                // Left Half (Symmetry)
+                for(let i = smooth.length - 1; i >= 0; i--) {
+                    let {x, y} = realToCanvas(smooth[i].h, smooth[i].w, cw, ch);
+                    let xl = centerX - (x - centerX);
+                    sectCtx.lineTo(xl, y);
+                }
+                sectCtx.stroke();
+                
+                // Add translucent fill
+                sectCtx.fillStyle = "rgba(56, 189, 248, 0.05)";
+                sectCtx.fill();
+            }
+
+            // --- Preview mode hides points and restriction line ---
+            if (!previewMode) {
+                // Draw Nodes (points)
+                for(let p of sorted) {
+                    let {x, y} = realToCanvas(p.h, p.w, cw, ch);
+                    let xl = centerX - (x - centerX);
+                    
+                    sectCtx.fillStyle = "#ec4899";
+                    sectCtx.strokeStyle = "#ffffff";
+                    sectCtx.lineWidth = 2;
+                    
+                    sectCtx.beginPath(); sectCtx.arc(x, y, 6, 0, Math.PI * 2); sectCtx.fill(); sectCtx.stroke();
+                    sectCtx.beginPath(); sectCtx.arc(xl, y, 6, 0, Math.PI * 2); sectCtx.fill(); sectCtx.stroke();
+                }
+
+                // Cargo Restriction Line
+                const pallet = pallets[selectedPalletIndex];
+                if(pallet) {
+                    const maxH = getMaxHeightForWidth(pallet.cargoWidth);
+                    const halfW = pallet.cargoWidth / 2;
+                    
+                    let pR = realToCanvas(maxH, halfW, cw, ch);
+                    let xL = centerX - (pR.x - centerX);
+                    
+                    sectCtx.beginPath();
+                    sectCtx.strokeStyle = "#f59e0b";
+                    sectCtx.lineWidth = 6;
+                    sectCtx.moveTo(xL, pR.y);
+                    sectCtx.lineTo(pR.x, pR.y);
+                    sectCtx.stroke();
+                }
+            }
+        }
+
+
+        // ------------------- ТАБЛИЦА ТОЧЕК -------------------
+        function renderPointsTable() {
+            const container = document.getElementById('pointsTable');
+            if(!container) return;
+            const sorted = [...sectionPoints].sort((a,b)=>a.h-b.h);
+            let html = `<div class="point-row header"><span>Height (cm)</span><span>Half-Width (cm)</span><span></span></div>`;
+            for(let i=0;i<sorted.length;i++) {
+                const pt = sorted[i];
+                html += `<div class="point-row">
+                            <input type="number" step="0.1" class="edit-h" value="${pt.h.toFixed(1)}">
+                            <input type="number" step="0.1" class="edit-w" value="${pt.w.toFixed(1)}">
+                            <button class="del-point" data-h="${pt.h}" data-w="${pt.w}">🗑️</button>
+                         </div>`;
+            }
+            container.innerHTML = html;
+            const rows = container.querySelectorAll('.point-row');
+
+            rows.forEach((row, idx) => {
+                if(idx===0) return;
+                const hInp = row.querySelector('.edit-h');
+                const wInp = row.querySelector('.edit-w');
+                const del = row.querySelector('.del-point');
+                const original = sorted[idx-1];
+                hInp.addEventListener('change', (e) => {
+                    let nh = parseFloat(e.target.value);
+                    if(!isNaN(nh) && nh>=0) {
+                        original.h = nh;
+                        updateSectionBounds(); drawSection(); renderPointsTable();
+                        updateSelectedPalletInfo(); drawSideView();
+                    }
+                });
+                wInp.addEventListener('change', (e) => {
+                    let nw = parseFloat(e.target.value);
+                    if(!isNaN(nw) && nw>=0) {
+                        original.w = nw;
+                        updateSectionBounds(); drawSection(); renderPointsTable();
+                        updateSelectedPalletInfo(); drawSideView();
+                    }
+                });
+                del.addEventListener('click', () => {
+                    const idx = sectionPoints.indexOf(original);
+                    if (idx > -1) {
+                        sectionPoints.splice(idx, 1);
+                        updateSectionBounds(); drawSection(); renderPointsTable();
+                        updateSelectedPalletInfo(); drawSideView();
+                    }
+                });
+            });
+        }
+
+        sectionCanvas.addEventListener('click', (e) => {
+            if (previewMode) return; // In preview mode, editing is disabled
+            const rect = sectionCanvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+            const real = canvasToReal(mx, my, sectionCanvas.clientWidth, sectionCanvas.clientHeight);
+            if(real.h>=0 && real.w>=0) {
+                const exists = sectionPoints.some(p=>Math.abs(p.h-real.h)<1);
+                if(!exists) {
+                    sectionPoints.push({h: real.h, w: real.w});
+                    updateSectionBounds(); drawSection(); renderPointsTable();
+                    updateSelectedPalletInfo(); drawSideView();
+                }
+            }
+        });
+
+        document.getElementById('resetSectionBtn').addEventListener('click', () => {
+            USER_PROFILES[activeZone] = FACTORY_PROFILES[activeZone].map(([h, w]) => ({ h, w: w / 2 }));
+            updateSelectedPalletInfo();
+            drawSideView();
+        });
+
+        document.getElementById('savePdfBtn').addEventListener('click', () => window.print());
+
+        // Preview Mode Toggle
+        const previewBtn = document.getElementById('previewModeBtn');
+        previewBtn.addEventListener('click', () => {
+            previewMode = !previewMode;
+            if (previewMode) {
+                previewBtn.textContent = "✏️ Edit Mode (Show Points)";
+                previewBtn.style.background = "#3b82f6";
+                previewBtn.style.borderColor = "#3b82f6";
+            } else {
+                previewBtn.textContent = "🔍 Preview Mode (Clean)";
+                previewBtn.style.background = "#10b981";
+                previewBtn.style.borderColor = "#10b981";
+            }
+            drawSection();
+        });
+
+        document.getElementById('btnPMC').addEventListener('click', () => {
+            document.getElementById('btnPMC').classList.add('active');
+            document.getElementById('btnPAG').classList.remove('active');
+            switchPalletType('PMC');
+        });
+        document.getElementById('btnPAG').addEventListener('click', () => {
+            document.getElementById('btnPAG').classList.add('active');
+            document.getElementById('btnPMC').classList.remove('active');
+            switchPalletType('PAG');
+        });
+
+        document.getElementById('exportPointsBtn').addEventListener('click', () => {
+            const data = JSON.stringify(sectionPoints.sort((a,b)=>a.h-b.h), null, 2);
+            const blob = new Blob([data], {type:'application/json'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = 'fuselage_section_real.json'; a.click();
+            URL.revokeObjectURL(url);
+        });
+        document.getElementById('copyPointsBtn').addEventListener('click', () => {
+            navigator.clipboard.writeText(JSON.stringify(sectionPoints.sort((a,b)=>a.h-b.h)));
+            alert("Точки сечения скопированы");
+        });
+
+        // Инициализация
+        pallets = buildPallets('PMC');
+        selectedPalletIndex = 0;
+        updateSelectedPalletInfo();
+        drawSideView();
+        window.addEventListener('resize', () => { 
+            drawSection(); 
+            drawSideView(); 
+        });
+
+        // Add some premium glowing effect to canvas
+        sectCtx.shadowBlur = 15;
+        sectCtx.shadowColor = "rgba(56, 189, 248, 0.4)";
+        sideCtx.shadowBlur = 10;
+        sideCtx.shadowColor = "rgba(244, 114, 182, 0.3)";
+
+    })();
+</script>
+</body>
+</html>

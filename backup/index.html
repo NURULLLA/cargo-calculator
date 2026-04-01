@@ -7,8 +7,14 @@
     <title>SkyGuard | Cargo Optimizer</title>
     <link rel="stylesheet" href="styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/three@0.145.0/build/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.145.0/examples/js/controls/OrbitControls.js"></script>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
     <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 </head>
 
@@ -94,7 +100,7 @@
                                 <input type="number" id="item-qty" value="10" title="Quantity">
                             </div>
                             <div class="input-group checkbox">
-                                <label><input type="checkbox" id="item-tip" checked> <i class="fas fa-rotate"></i> Allow Tipping/Rotation</label>
+                                <label><input type="checkbox" id="item-tip"> Allow Tipping</label>
                             </div>
                             <div class="input-group checkbox">
                                 <label><input type="checkbox" id="item-no-stack"> Do Not Stack / Top Only</label>
@@ -106,13 +112,7 @@
                             <div class="input-group checkbox separator-top">
                                 <label class="checkbox-label">
                                     <input type="checkbox" id="main-deck-only">
-                                    <strong>Main Deck Only</strong>
-                                </label>
-                            </div>
-                            <div class="input-group checkbox">
-                                <label class="checkbox-label">
-                                    <input type="checkbox" id="lower-deck-only">
-                                    <strong>Lower Deck Only</strong>
+                                    <strong>Main Deck Only Loading</strong>
                                 </label>
                             </div>
                             <div class="btn-group">
@@ -211,10 +211,7 @@
     <!-- Notification system -->
     <div id="toast-container"></div>
 
-    <script src="packer.js?v=final"></script>
-    <script src="ui_visualizer_main.js?v=final"></script>
-    <script src="ui_visualizer_3d.js?v=final"></script>
-    <script src="app.js?v=final"></script>
+    <script type="module" src="app.js?v=2.3"></script>
 </body>
 
 </html>

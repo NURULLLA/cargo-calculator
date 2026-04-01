@@ -1,8 +1,6 @@
-// import { Packer, CONFIG } from './packer.js?v=9';
-// import { MainDeckViz } from './ui_visualizer_main.js';
-// import { LowerDeckViz } from './ui_visualizer_3d.js?v=2.3';
-
-// The app will now use global Packer, CONFIG, MainDeckViz, and LowerDeckViz
+import { Packer, CONFIG } from './packer.js?v=9';
+import { MainDeckViz } from './ui_visualizer_main.js';
+import { LowerDeckViz } from './ui_visualizer_3d.js?v=2.3';
 
 class CargoApp {
     constructor() {
@@ -102,9 +100,7 @@ class CargoApp {
             length: getColIdx(['d cm', 'l cm', 'length', 'l (cm)', 'depth', 'd', 'l']),
             height: getColIdx(['h cm', 'height', 'h (cm)', 'h']),
             weight: getColIdx(['kg', 'weight', 'wt', 'kgs', 'weight kg']),
-            qty: getColIdx(['qty', 'quantity', 'count', 'units', 'pcs']),
-            tip: getColIdx(['tip', 'rotate', 'tipping', 'allow tipping']),
-            lowerDeck: getColIdx(['lower deck', 'ld', 'lower', 'only lower'])
+            qty: getColIdx(['qty', 'quantity', 'count', 'units', 'pcs'])
         };
 
         console.log("Column Mapping:", colMapping);
@@ -124,19 +120,6 @@ class CargoApp {
             const h = colMapping.height !== -1 ? parseFloat(row[colMapping.height]) : NaN;
             const wt = colMapping.weight !== -1 ? parseFloat(row[colMapping.weight]) : NaN;
             const qty = colMapping.qty !== -1 ? parseInt(row[colMapping.qty]) || 1 : 1;
-            
-            // Handle optional flags from Excel
-            let allowTipping = true;
-            if (colMapping.tip !== -1) {
-                const tipVal = String(row[colMapping.tip] || '').toLowerCase();
-                if (tipVal === 'no' || tipVal === 'false' || tipVal === '0' || tipVal === 'n') allowTipping = false;
-            }
-
-            let lowerDeckOnly = false;
-            if (colMapping.lowerDeck !== -1) {
-                const ldVal = String(row[colMapping.lowerDeck] || '').toLowerCase();
-                if (ldVal === 'yes' || ldVal === 'true' || ldVal === '1' || ldVal === 'y') lowerDeckOnly = true;
-            }
 
             if (isNaN(l) || isNaN(w) || isNaN(h) || isNaN(wt)) {
                 console.warn(`Skipping row ${idx + 2}: Invalid dimensions/weight`, row);
@@ -152,11 +135,10 @@ class CargoApp {
                 height: h,
                 weight: wt,
                 count: qty,
-                allowTipping: allowTipping,
+                allowTipping: true,
                 noStack: false,
                 priority: false,
-                mainDeckOnly: false,
-                lowerDeckOnly: lowerDeckOnly
+                mainDeckOnly: false
             });
             importCount++;
         });
@@ -218,12 +200,6 @@ class CargoApp {
         const noStack = document.getElementById('item-no-stack').checked;
         const priority = document.getElementById('item-priority').checked;
         const mainDeckOnly = document.getElementById('main-deck-only').checked;
-        const lowerDeckOnly = document.getElementById('lower-deck-only').checked;
-
-        if (mainDeckOnly && lowerDeckOnly) {
-            alert("An item cannot be both Main Deck Only and Lower Deck Only");
-            return;
-        }
 
         if (isNaN(l) || isNaN(w) || isNaN(h) || isNaN(wt) || isNaN(qty)) {
             alert("Please enter valid numbers");
@@ -241,8 +217,7 @@ class CargoApp {
             allowTipping: tip,
             noStack,
             priority,
-            mainDeckOnly,
-            lowerDeckOnly
+            mainDeckOnly
         });
         this.renderInventory();
 
@@ -250,7 +225,6 @@ class CargoApp {
         document.getElementById('item-name').value = '';
         document.getElementById('item-priority').checked = false;
         document.getElementById('main-deck-only').checked = false;
-        document.getElementById('lower-deck-only').checked = false;
     }
 
     removeCargoItem(id) {
@@ -274,8 +248,6 @@ class CargoApp {
                     ${item.count} 
                     ${item.noStack ? '<span class="badge" style="background:#ef4444; color:white; padding:2px 4px; border-radius:4px; font-size:0.7em;">Top Only</span>' : ''}
                     ${item.mainDeckOnly ? '<span class="badge" style="background:#0ea5e9; color:white; padding:2px 4px; border-radius:4px; font-size:0.7em;">Main Deck Only</span>' : ''}
-                    ${item.lowerDeckOnly ? '<span class="badge" style="background:#8b5cf6; color:white; padding:2px 4px; border-radius:4px; font-size:0.7em;">Lower Deck Only</span>' : ''}
-                    ${item.allowTipping ? '<span class="badge" style="background:#10b981; color:white; padding:2px 4px; border-radius:4px; font-size:0.7em;" title="Can be tipped/rotated"><i class="fas fa-rotate"></i> Tip OK</span>' : '<span class="badge" style="background:#6b7280; color:white; padding:2px 4px; border-radius:4px; font-size:0.7em;" title="Must stay upright"><i class="fas fa-up-long"></i> No Tip</span>'}
                 </td>
                 <td>
                     <button class="btn-danger" data-id="${item.id}">
