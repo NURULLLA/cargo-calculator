@@ -15,8 +15,8 @@ const CONFIG = {
             code: "PAG",
             name: "PAG (High) - 15 positions",
             count: 15,
-            length_cross: 303,
-            width_long: 209,
+            length_cross: 301,  // real measured usable cm
+            width_long: 207,    // real measured usable cm
             max_height: 208,
             tare_weight: 110,
             contour_start_height: 114.3,
@@ -32,8 +32,8 @@ const CONFIG = {
             code: "PMC",
             name: "PMC (Wide) - 13 positions",
             count: 13,
-            length_cross: 303,
-            width_long: 229,
+            length_cross: 301,  // real measured usable cm
+            width_long: 227,    // real measured usable cm
             max_height: 208,
             tare_weight: 120,
             contour_start_height: 114.3,
@@ -279,9 +279,12 @@ const Packer = {
         };
 
         // Split items based on where they CAN and SHOULD go
-        const mustMainItems = workingItems.filter(i => i.mainDeckOnly || !fitsInAnyLowerDoor(i));
+        // NOTE: lowerDeckOnly items that don't fit the door are excluded from mustMain —
+        // they are physically impossible to load and will appear as leftovers.
+        const mustMainItems = workingItems.filter(i => !i.lowerDeckOnly && (i.mainDeckOnly || !fitsInAnyLowerDoor(i)));
         const flexibleItems = workingItems.filter(i => !i.mainDeckOnly && !i.lowerDeckOnly && fitsInAnyLowerDoor(i));
         const mustLowerItems = workingItems.filter(i => i.lowerDeckOnly && fitsInAnyLowerDoor(i));
+        // lowerDeckOnly items that don't fit ANY lower deck door → stay in workingItems untouched → become leftovers
 
         // Sorting for Main Deck: Big volume first
         const sortForMain = (items) => items.sort((a, b) => {
@@ -398,7 +401,7 @@ const Packer = {
                         if (toTake > 0) {
                             let existing = compData.items.find(i => i.name === item.name);
                             if (existing) existing.count += toTake;
-                            else compData.items.push({ name: item.name, count: toTake, l: itemLen, h: itemHeight, w: item.dims[0] });
+                            else compData.items.push({ name: item.name, count: toTake, l: itemLen, h: itemHeight, w: item.dims[0], weight: item.weight }); // weight stored for manifest display
                             
                             compData.weight += toTake * item.weight;
                             holdRes.current_weight += toTake * item.weight;
@@ -418,9 +421,10 @@ const Packer = {
         // --- PASS 3: PACK REMAINING FLEXIBLE ITEMS ONTO MAIN DECK PALLETS ---
         packToPallets(flexibleItems);
 
-        // --- PASS 4: FINAL CLEANUP (Try everything against Lower Deck again) ---
+        // --- PASS 4: FINAL CLEANUP (Try remaining flexible items in Lower Deck again) ---
+        // NOTE: mustMainItems are NEVER sent to lower deck — they either have mainDeckOnly flag
+        // or physically don't fit through the lower deck door.
         packToLowerDeck(flexibleItems);
-        packToLowerDeck(mustMainItems); // Just in case a large item fits door but was skipped
 
         return { pallets, lowerDeck: lowerDeckResults, leftovers: workingItems.filter(i => i.count > 0), aircraftId, maxGrossLimit };
     }

@@ -302,7 +302,11 @@ class CargoApp {
         }
 
         console.log("Pack Results:", this.results);
+        this.renderResultsUI(configCode);
+        this.switchTab('summary-tab');
+    }
 
+    renderResultsUI(configCode) {
         // Update Summary Stats
         const totalW = this.results.pallets.reduce((acc, p) => acc + p.currentWeight, 0) +
             this.results.lowerDeck.reduce((acc, h) => acc + h.current_weight, 0);
@@ -389,7 +393,8 @@ class CargoApp {
                 div.className = 'leftover-item';
                 div.style.padding = '0.5rem';
                 div.style.borderBottom = '1px solid var(--border)';
-                div.innerHTML = `<strong>${item.name}</strong>: ${item.count} units - Could not fit (Limit or Space)`;
+                const reason = item.lowerDeckOnly ? 'LowerDeckOnly — too large for any hold door' : 'Could not fit (Limit or Space)';
+                div.innerHTML = `<strong>${item.name}</strong>: ${item.count} units — ${reason}`;
                 leftoverList.appendChild(div);
             });
         } else {
@@ -398,9 +403,6 @@ class CargoApp {
 
         // Render Report
         this.renderReport();
-
-        // Show Success
-        this.switchTab('summary-tab');
     }
 
     renderReport() {
@@ -528,28 +530,44 @@ class CargoApp {
 
         setTimeout(() => {
             const configCode = document.getElementById('config-select').value;
+            const palletConfig = CONFIG.PALLET_OPTIONS[configCode];
+
+            // Get loaded pallets and pick random target positions for them
             let activePallets = this.results.pallets.filter(p => p.currentWeight > 0);
+            let availablePositions = Array.from({ length: palletConfig.count }, (_, i) => i + 1);
+            this.shuffleArray(availablePositions);
+            let targetPositions = availablePositions.slice(0, activePallets.length).sort((a, b) => a - b);
 
-            // Random shuffle of active pallets into available positions
-            let positions = Array.from({ length: CONFIG.PALLET_OPTIONS[configCode].count }, (_, i) => i);
-            this.shuffleArray(positions);
-
-            let newPallets = Array.from({ length: CONFIG.PALLET_OPTIONS[configCode].count }, (_, i) => ({
-                id: i + 1,
-                config: CONFIG.PALLET_OPTIONS[configCode],
-                layers: [],
-                currentWeight: 0,
-                tareWeight: CONFIG.PALLET_OPTIONS[configCode].tare_weight,
-                maxNetWeight: CONFIG.PALLET_OPTIONS[configCode].max_weight - CONFIG.PALLET_OPTIONS[configCode].tare_weight
-            }));
-
+            // Reassign position IDs on the existing pallet objects (no re-packing!)
             activePallets.forEach((p, idx) => {
-                const targetIdx = positions[idx];
-                newPallets[targetIdx] = { ...p, id: targetIdx + 1 };
+                p.id = targetPositions[idx];
             });
 
+            // Rebuild full pallet array — active pallets in new slots, rest empty
+            const newPallets = [];
+            for (let i = 1; i <= palletConfig.count; i++) {
+                const active = activePallets.find(p => p.id === i);
+                if (active) {
+                    newPallets.push(active);
+                } else {
+                    // Use correct weight field: weight_limits per position or default_weight
+                    const wLimit = palletConfig.weight_limits[i] || palletConfig.default_weight;
+                    newPallets.push({
+                        id: i,
+                        config: palletConfig,
+                        layers: [],
+                        currentWeight: 0,
+                        currentHeight: 0,
+                        maxNetWeight: wLimit - palletConfig.tare_weight,
+                        zone: i === 1 ? 'NOSE' : (i === palletConfig.count ? 'TAIL' : 'MIDDLE')
+                    });
+                }
+            }
+
             this.results.pallets = newPallets;
-            this.calculate(); // Recalculate totals
+
+            // Update report and visualization only — NO re-packing
+            this.renderReport();
             this.mdViz.update(this.results);
 
             btn.innerHTML = originalHtml;
