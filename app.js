@@ -181,20 +181,26 @@ class CargoApp {
         document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
         document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
 
-        document.getElementById(tabId).classList.add('active');
-        document.querySelector(`[data-tab="${tabId}"]`).classList.add('active');
+        const panel = document.getElementById(tabId);
+        const navBtn = document.querySelector(`[data-tab="${tabId}"]`);
+        if (!panel || !navBtn) { console.warn('Unknown tab:', tabId); return; }
+        panel.classList.add('active');
+        navBtn.classList.add('active');
 
         this.currentTab = tabId;
 
         // Update Title
         const titles = {
-            'input-tab': { h1: 'Cargo Inventory', p: 'Define batch dimensions and quantities' },
-            'main-deck-tab': { h1: 'Main Deck Plan', p: '3D Visualization of Upper Deck Pallets' },
-            'lower-deck-tab': { h1: 'Lower Deck Plan', p: 'Hold utilization and bulk cargo layout' },
-            'summary-tab': { h1: 'Load Summary', p: 'Final payload distribution and reports' }
+            'input-tab':      { h1: 'Cargo Inventory',  p: 'Define batch dimensions and quantities' },
+            'main-deck-tab':  { h1: 'Main Deck Plan',   p: '3D Visualization of Upper Deck Pallets' },
+            'lower-deck-tab': { h1: 'Lower Deck Plan',  p: 'Hold utilization and bulk cargo layout' },
+            'summary-tab':    { h1: 'Load Summary',     p: 'Final payload distribution and reports' }
         };
-        document.getElementById('tab-title').textContent = titles[tabId].h1;
-        document.getElementById('tab-subtitle').textContent = titles[tabId].p;
+        const title = titles[tabId];
+        if (title) {
+            document.getElementById('tab-title').textContent = title.h1;
+            document.getElementById('tab-subtitle').textContent = title.p;
+        }
 
         // Trigger scene updates if needed
         if (tabId === 'main-deck-tab') {
@@ -246,8 +252,9 @@ class CargoApp {
         });
         this.renderInventory();
 
-        // Reset form
+        // Reset form fields after adding item
         document.getElementById('item-name').value = '';
+        document.getElementById('item-qty').value = '1';
         document.getElementById('item-priority').checked = false;
         document.getElementById('main-deck-only').checked = false;
         document.getElementById('lower-deck-only').checked = false;
@@ -353,7 +360,7 @@ class CargoApp {
                 ${isNetOverload ? '<br><small style="color:#ef4444;"><i class="fas fa-exclamation-triangle"></i> Structural Limit Exceeded</small>' : ''}
             </div>
             <div style="margin-bottom: 10px;">
-                <small style="color:var(--text-muted); display:block; margin-bottom:4px;">ACTUAL LOADED (ZFW)</small>
+                <small style="color:var(--text-muted); display:block; margin-bottom:4px;">ACTUAL LOADED (GROSS PAYLOAD)</small>
                 Net: ${totalW.toLocaleString()} kg<br>
                 <span style="font-size:0.85em; color:${limitColor}; font-weight:bold;">Gross: ${totalGross.toLocaleString()} / ${maxLimit.toLocaleString()} kg (${loadPercentage}%)</span>
             </div>
@@ -475,11 +482,12 @@ class CargoApp {
                 ${l.count} x ${l.box_name} <br>`;
 
             // Add metadata details if available
+            // meta.main.r = rows along long axis, meta.main.c = cols along cross axis
             if (l.meta && l.meta.main) {
-                text += `<small>Main Block: ${l.meta.main.c} rows x ${l.meta.main.r} cols</small>`;
+                text += `<small>Main Block: ${l.meta.main.r} rows × ${l.meta.main.c} cols</small>`;
             }
             if (l.meta && l.meta.side) {
-                text += `<br><small>Side Block: ${l.meta.side.c} rows x ${l.meta.side.r} cols (Rotated)</small>`;
+                text += `<br><small>Side Block: ${l.meta.side.r} rows × ${l.meta.side.c} cols (Rotated)</small>`;
             }
             text += `</div>`;
         });

@@ -143,8 +143,8 @@ class MainDeckViz {
 
                     const sDimZ = dimX; // dimLong
                     const sDimX = dimZ; // dimCross
-                    const sColsZ = layer.meta.side.r;
-                    const sRowsX = layer.meta.side.c;
+                    const sColsZ = layer.meta.side.c; // Corrected: meta.side.c is cols (Z)
+                    const sRowsX = layer.meta.side.r; // Corrected: meta.side.r is rows (X)
 
                     const sideStartZ = startZ + (colsZ * dimZ);
                     // Side block starts after the main block in Z axis

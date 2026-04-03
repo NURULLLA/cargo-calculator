@@ -192,10 +192,14 @@ class Pallet {
 }
 
 const Packer = {
+    // Check if item can physically pass through a door opening.
+    // item.dims is sorted ascending [smallest, mid, largest].
+    // For an item to fit through a door, its two smallest dimensions must
+    // be <= the door's two dimensions (in some orientation).
     fitsThroughDoor: (item, door) => {
-        let [i_min, i_mid] = item.dims;
-        let d_min = Math.min(door.width, door.height);
-        let d_max = Math.max(door.width, door.height);
+        const [i_min, i_mid] = item.dims; // item.dims sorted asc; largest dim is depth along cargo direction
+        const d_min = Math.min(door.width, door.height);
+        const d_max = Math.max(door.width, door.height);
         return i_min <= d_min && i_mid <= d_max;
     },
 
@@ -210,6 +214,8 @@ const Packer = {
         if (availCross < Math.min(variant.l, variant.w)) return null;
 
         function tryOrientation(dimCross, dimLong) {
+            // cols = how many boxes fit across the fuselage width (cross direction)
+            // rows = how many boxes fit along the pallet length (long direction)
             let cols = Math.floor(availCross / dimCross);
             let rows = Math.floor(availLong / dimLong);
             let countMain = cols * rows;
@@ -218,9 +224,10 @@ const Packer = {
             if (remCross >= dimLong && availLong >= dimCross) {
                 let sCols = Math.floor(remCross / dimLong);
                 let sRows = Math.floor(availLong / dimCross);
-                sideMeta = { r: sCols, c: sRows, count: sCols * sRows };
+                sideMeta = { r: sRows, c: sCols, count: sCols * sRows };
             }
-            return { total: countMain + (sideMeta ? sideMeta.count : 0), meta: { main: { r: cols, c: rows }, side: sideMeta } };
+            // FIX: r = rows (along long axis), c = cols (along cross axis) — consistent naming
+            return { total: countMain + (sideMeta ? sideMeta.count : 0), meta: { main: { r: rows, c: cols }, side: sideMeta } };
         }
 
         let a = tryOrientation(variant.l, variant.w);
@@ -268,12 +275,12 @@ const Packer = {
             return item;
         });
 
-        // Classification helper
+        // Classification helper — mirrors Packer.fitsThroughDoor logic
         const fitsInAnyLowerDoor = (item) => {
             return CONFIG.LOWER_DECK.some(hold => {
-                let [i_min, i_mid] = item.dims;
-                let d_min = Math.min(hold.door.width, hold.door.height);
-                let d_max = Math.max(hold.door.width, hold.door.height);
+                const [i_min, i_mid] = item.dims; // sorted asc; we check two smallest vs door opening
+                const d_min = Math.min(hold.door.width, hold.door.height);
+                const d_max = Math.max(hold.door.width, hold.door.height);
                 return i_min <= d_min && i_mid <= d_max;
             });
         };
@@ -380,11 +387,18 @@ const Packer = {
                         let d_max = Math.max(hold.door.width, hold.door.height);
                         if (!(i_min <= d_min && i_mid <= d_max)) continue;
 
+                        // When tipping is allowed, use the smallest dim as height (lay it flat)
+                        // The longest dim becomes the "length" stacked along the compartment floor
                         let itemHeight = item.allowTipping ? item.dims[0] : item.originalDims[2];
-                        let itemLen = item.dims[1]; 
+                        // FIX: use the largest remaining dim as itemLen (compartment floor direction)
+                        // dims sorted [small, mid, large]; if allowTipping, height=dims[0], len=dims[2]
+                        // If NOT tipping, original height is dims[2], len=max(dims[0], dims[1])
+                        let itemLen = item.allowTipping ? item.dims[2] : Math.max(item.originalDims[0], item.originalDims[1]);
                         if (itemHeight > compSpec.max_height_cm) continue;
 
-                        let rows = Math.floor(hold.floor_width_cm / (item.allowTipping ? item.dims[0] : Math.min(item.originalDims[0], item.originalDims[1])));
+                        // rows across the hold floor width (using the smallest footprint dim)
+                        let itemFloorW = item.allowTipping ? item.dims[1] : Math.min(item.originalDims[0], item.originalDims[1]);
+                        let rows = Math.floor(hold.floor_width_cm / itemFloorW);
                         if (rows < 1) rows = 1;
                         let maxGeo = Math.floor(compSpec.max_length_cm / itemLen) * rows * Math.floor(compSpec.max_height_cm / itemHeight);
                         if (maxGeo <= 0) continue;
@@ -401,7 +415,7 @@ const Packer = {
                         if (toTake > 0) {
                             let existing = compData.items.find(i => i.name === item.name);
                             if (existing) existing.count += toTake;
-                            else compData.items.push({ name: item.name, count: toTake, l: itemLen, h: itemHeight, w: item.dims[0], weight: item.weight }); // weight stored for manifest display
+                            else compData.items.push({ name: item.name, count: toTake, l: itemLen, h: itemHeight, w: itemFloorW, weight: item.weight }); // weight stored for manifest display
                             
                             compData.weight += toTake * item.weight;
                             holdRes.current_weight += toTake * item.weight;
