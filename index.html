@@ -121,6 +121,9 @@
                                 <button id="btn-import-excel" class="btn-secondary">
                                     <i class="fas fa-file-excel"></i> Import Excel
                                 </button>
+                                <button id="btn-paste-excel" class="btn-secondary" style="background: linear-gradient(135deg, #7c3aed, #a855f7);">
+                                    <i class="fas fa-paste"></i> Paste from Excel
+                                </button>
                                 <input type="file" id="excel-upload" accept=".xlsx, .xls" style="display: none;">
                             </div>
                             <div id="import-status" class="import-status"></div>
@@ -211,6 +214,50 @@
 
     <!-- Notification system -->
     <div id="toast-container"></div>
+
+    <!-- Paste from Excel Modal -->
+    <div id="paste-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:9999; display:none; align-items:center; justify-content:center;">
+        <div style="background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:2rem; width:680px; max-width:95vw; max-height:90vh; overflow-y:auto; box-shadow: 0 25px 60px rgba(0,0,0,0.5);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
+                <h3 style="margin:0; color:var(--accent);"><i class="fas fa-paste"></i> Paste from Excel</h3>
+                <button onclick="document.getElementById('paste-modal').style.display='none'" style="background:none;border:none;color:var(--text-muted);font-size:1.5rem;cursor:pointer;">&times;</button>
+            </div>
+
+            <div style="background:rgba(124,58,237,0.1); border:1px solid #7c3aed; border-radius:8px; padding:1rem; margin-bottom:1.2rem; font-size:0.85em; color:var(--text-muted);">
+                <strong style="color:#a855f7;"><i class="fas fa-info-circle"></i> Инструкция:</strong><br>
+                1. Откройте ваш Excel файл (например PACKING LIST)<br>
+                2. Выделите строку с заголовками + все строки с данными<br>
+                3. Нажмите <kbd style="background:#333;padding:1px 5px;border-radius:3px;">Ctrl+C</kbd> (скопировать)<br>
+                4. Кликните в поле ниже и нажмите <kbd style="background:#333;padding:1px 5px;border-radius:3px;">Ctrl+V</kbd> (вставить)<br>
+                5. Нажмите <strong style="color:#a855f7;">Добавить в список</strong>
+            </div>
+
+            <div style="margin-bottom:0.8rem; font-size:0.82em; color:var(--text-muted);">
+                Программа автоматически найдёт колонки:
+                <span style="background:#1e3a5f;padding:2px 6px;border-radius:4px;margin:2px;">Description / Название</span>
+                <span style="background:#1e3a5f;padding:2px 6px;border-radius:4px;margin:2px;">Qty / Cartons</span>
+                <span style="background:#1e3a5f;padding:2px 6px;border-radius:4px;margin:2px;">Weight (kg)</span>
+                <span style="background:#1e3a5f;padding:2px 6px;border-radius:4px;margin:2px;">Size / L x W x H</span>
+            </div>
+
+            <textarea id="paste-area" placeholder="Вставьте сюда скопированные ячейки из Excel (Ctrl+V)..."
+                style="width:100%; height:220px; background:var(--bg); color:var(--text); border:1px solid var(--border);
+                border-radius:8px; padding:0.75rem; font-family:monospace; font-size:0.82em;
+                resize:vertical; box-sizing:border-box; outline:none;"
+            ></textarea>
+
+            <div id="paste-preview" style="margin-top:0.75rem; font-size:0.82em; color:var(--text-muted);"></div>
+
+            <div style="display:flex; gap:1rem; margin-top:1.2rem;">
+                <button id="btn-paste-confirm" class="btn-primary" style="flex:1;">
+                    <i class="fas fa-check"></i> Добавить в список
+                </button>
+                <button onclick="document.getElementById('paste-area').value=''; document.getElementById('paste-preview').innerHTML='';" class="btn-secondary">
+                    <i class="fas fa-trash"></i> Очистить
+                </button>
+            </div>
+        </div>
+    </div>
 
     <script src="packer.js?v=final"></script>
     <script src="ui_visualizer_main.js?v=final"></script>

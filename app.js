@@ -36,6 +36,34 @@ class CargoApp {
         // Calculate
         document.getElementById('btn-calculate').addEventListener('click', () => this.calculate());
 
+        // Paste from Excel
+        const pasteBtn = document.getElementById('btn-paste-excel');
+        const pasteModal = document.getElementById('paste-modal');
+        const pasteArea = document.getElementById('paste-area');
+        if (pasteBtn && pasteModal) {
+            pasteBtn.addEventListener('click', () => {
+                pasteModal.style.display = 'flex';
+                setTimeout(() => pasteArea.focus(), 100);
+            });
+            // Close on backdrop click
+            pasteModal.addEventListener('click', (e) => {
+                if (e.target === pasteModal) pasteModal.style.display = 'none';
+            });
+            // Live preview
+            pasteArea.addEventListener('input', () => this.previewPastedExcel());
+            pasteArea.addEventListener('paste', () => setTimeout(() => this.previewPastedExcel(), 50));
+            // Confirm import
+            document.getElementById('btn-paste-confirm').addEventListener('click', () => {
+                const count = this.importPastedExcel();
+                if (count > 0) {
+                    pasteModal.style.display = 'none';
+                    pasteArea.value = '';
+                    document.getElementById('paste-preview').innerHTML = '';
+                    this.showImportStatus(`✅ Добавлено ${count} позиций из вставленных данных`, 'success');
+                }
+            });
+        }
+
         // Initial render
         this.renderInventory();
     }
@@ -538,6 +566,108 @@ class CargoApp {
         `;
         document.body.appendChild(modal);
     }
+
+    // ─── PASTE FROM EXCEL ───────────────────────────────────────────────────
+    _parsePasteText(text) {
+        const lines = text.trim().split(/\r?\n/).filter(l => l.trim());
+        if (lines.length < 2) return [];
+
+        // Parse TSV (tab-separated, as copied from Excel)
+        const rows = lines.map(l => l.split('\t').map(c => c.trim()));
+        const headers = rows[0].map(h => h.toLowerCase());
+
+        const findCol = (aliases) => {
+            let idx = headers.findIndex(h => aliases.some(a => h === a));
+            if (idx !== -1) return idx;
+            idx = headers.findIndex(h => aliases.some(a => h.startsWith(a)));
+            if (idx !== -1) return idx;
+            return headers.findIndex(h => aliases.some(a => a.length > 2 && h.includes(a)));
+        };
+
+        const cols = {
+            name:    findCol(['description of goods', 'description', 'item name', 'name', 'batch', 'box', 'cargo']),
+            qty:     findCol(['total cartoon', 'total carton', 'qty', 'quantity', 'cartons', 'ctns', 'count', 'pcs', 'units']),
+            weight:  findCol(['gross weight', 'weight per carton', 'weight', 'gross wt', 'kg', 'wt', 'kgs']),
+            size:    findCol(['size of per carton', 'size per carton', 'size', 'dimensions', 'meas', 'l x w x h']),
+            length:  findCol(['l cm', 'd cm', 'length', 'l (cm)', 'l']),
+            width:   findCol(['w cm', 'width', 'w (cm)', 'w']),
+            height:  findCol(['h cm', 'height', 'h (cm)', 'h']),
+        };
+
+        const items = [];
+        for (let i = 1; i < rows.length; i++) {
+            const row = rows[i];
+            if (!row || !row.some(c => c)) continue;
+
+            const name = cols.name !== -1 && row[cols.name] ? row[cols.name] : `Item ${i}`;
+            let l = cols.length !== -1 ? parseFloat(row[cols.length]) : NaN;
+            let w = cols.width  !== -1 ? parseFloat(row[cols.width])  : NaN;
+            let h = cols.height !== -1 ? parseFloat(row[cols.height]) : NaN;
+
+            // Parse from combined size column e.g. "65 x 45.5 x 30" or "50*50*55"
+            if ((isNaN(l) || isNaN(w) || isNaN(h)) && cols.size !== -1 && row[cols.size]) {
+                const nums = row[cols.size].match(/\d+(\.\d+)?/g);
+                if (nums && nums.length >= 3) {
+                    l = parseFloat(nums[0]);
+                    w = parseFloat(nums[1]);
+                    h = parseFloat(nums[2]);
+                }
+            }
+
+            const wt  = cols.weight !== -1 ? parseFloat(row[cols.weight]) : NaN;
+            const qty = cols.qty    !== -1 ? (parseInt(row[cols.qty]) || 1) : 1;
+
+            if (isNaN(l) || isNaN(w) || isNaN(h) || isNaN(wt) || l <= 0 || w <= 0 || h <= 0 || wt <= 0) continue;
+
+            items.push({ name, length: l, width: w, height: h, weight: wt, count: qty });
+        }
+        return items;
+    }
+
+    previewPastedExcel() {
+        const text = document.getElementById('paste-area').value;
+        const items = this._parsePasteText(text);
+        const preview = document.getElementById('paste-preview');
+        if (items.length === 0) {
+            preview.innerHTML = '<span style="color:#ef4444;">⚠️ Данные не распознаны. Убедитесь что первая строка — заголовки.</span>';
+            return;
+        }
+        let html = `<span style="color:#10b981;">✅ Найдено ${items.length} позиций:</span><br><div style="margin-top:6px; max-height:100px; overflow-y:auto;">`;
+        items.slice(0, 5).forEach(it => {
+            html += `<div style="padding:2px 0; border-bottom:1px solid var(--border);">📦 <strong>${it.name}</strong> — ${it.count} шт | ${it.length}×${it.width}×${it.height} см | ${it.weight} кг</div>`;
+        });
+        if (items.length > 5) html += `<div style="color:var(--text-muted); padding-top:4px;">... и ещё ${items.length - 5} позиций</div>`;
+        html += '</div>';
+        preview.innerHTML = html;
+    }
+
+    importPastedExcel() {
+        const text = document.getElementById('paste-area').value;
+        const items = this._parsePasteText(text);
+        if (items.length === 0) {
+            alert('Данные не распознаны. Убедитесь, что вы скопировали строку с заголовками и данные.');
+            return 0;
+        }
+        items.forEach(it => {
+            this.cargo.push({
+                id: Date.now() + Math.random(),
+                name: it.name,
+                length: it.length,
+                width: it.width,
+                height: it.height,
+                weight: it.weight,
+                count: it.count,
+                allowTipping: true,
+                noStack: false,
+                priority: false,
+                mainDeckOnly: false,
+                lowerDeckOnly: false
+            });
+        });
+        this.renderInventory();
+        return items.length;
+    }
+    // ────────────────────────────────────────────────────────────────────────
 
     optimize() {
         if (!this.results || this.results.pallets.filter(p => p.currentWeight > 0).length === 0) {
