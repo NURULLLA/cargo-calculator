@@ -97,12 +97,13 @@ class CargoApp {
         };
 
         const colMapping = {
-            name: getColIdx(['box', 'item name', 'name', 'description', 'batch', 'cargo', 'box #']),
+            name: getColIdx(['box', 'item name', 'name', 'description of goods', 'description', 'batch', 'cargo', 'box #']),
             width: getColIdx(['w cm', 'width', 'w (cm)', 'breadth', 'w']),
             length: getColIdx(['d cm', 'l cm', 'length', 'l (cm)', 'depth', 'd', 'l']),
             height: getColIdx(['h cm', 'height', 'h (cm)', 'h']),
-            weight: getColIdx(['kg', 'weight', 'wt', 'kgs', 'weight kg']),
-            qty: getColIdx(['qty', 'quantity', 'count', 'units', 'pcs']),
+            sizeCol: getColIdx(['size', 'size of per carton', 'dimensions', 'meas']),
+            weight: getColIdx(['gross weight', 'weight', 'kg', 'wt', 'kgs', 'weight kg']),
+            qty: getColIdx(['total cartoon', 'total carton', 'qty', 'quantity', 'count', 'units', 'pcs', 'ctns']),
             tip: getColIdx(['tip', 'rotate', 'tipping', 'allow tipping']),
             lowerDeck: getColIdx(['lower deck', 'ld', 'lower', 'only lower'])
         };
@@ -118,10 +119,23 @@ class CargoApp {
                 return;
             }
 
-            const name = colMapping.name !== -1 ? String(row[colMapping.name] || `Item ${idx + 1}`) : `Item ${idx + 1}`;
-            const l = colMapping.length !== -1 ? parseFloat(row[colMapping.length]) : NaN;
-            const w = colMapping.width !== -1 ? parseFloat(row[colMapping.width]) : NaN;
-            const h = colMapping.height !== -1 ? parseFloat(row[colMapping.height]) : NaN;
+            const name = colMapping.name !== -1 && row[colMapping.name] ? String(row[colMapping.name]) : `Item ${idx + 1}`;
+            let l = colMapping.length !== -1 ? parseFloat(row[colMapping.length]) : NaN;
+            let w = colMapping.width !== -1 ? parseFloat(row[colMapping.width]) : NaN;
+            let h = colMapping.height !== -1 ? parseFloat(row[colMapping.height]) : NaN;
+            
+            // Parse combined size column if individual dimensions are missing
+            if ((isNaN(l) || isNaN(w) || isNaN(h)) && colMapping.sizeCol !== -1) {
+                const sizeStr = String(row[colMapping.sizeCol] || '');
+                // Regex to find all numbers, including decimals (e.g., 65, 45.5, 30)
+                const nums = sizeStr.match(/\d+(\.\d+)?/g);
+                if (nums && nums.length >= 3) {
+                    l = parseFloat(nums[0]);
+                    w = parseFloat(nums[1]);
+                    h = parseFloat(nums[2]);
+                }
+            }
+
             const wt = colMapping.weight !== -1 ? parseFloat(row[colMapping.weight]) : NaN;
             const qty = colMapping.qty !== -1 ? parseInt(row[colMapping.qty]) || 1 : 1;
             

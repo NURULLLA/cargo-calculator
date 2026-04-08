@@ -314,16 +314,27 @@ const Packer = {
 
                     let bestLayer = null;
                     let itemToTake = null;
+                    
                     for (let item of targetItems) {
                         if (item.count <= 0) continue;
                         if (!Packer.fitsThroughDoor(item, CONFIG.DOOR_MAIN)) continue;
+                        if (p.remainingWeight() < item.weight) continue;
+                        if (currentTotalGross + item.weight > maxGrossLimit) continue;
                         
+                        let bestVariantLayer = null;
                         for (let variant of item.getVariants()) {
                             let res = Packer.calculateLayer(p, variant);
-                            if (res && (!bestLayer || res.count > bestLayer.count)) {
-                                bestLayer = res;
-                                itemToTake = item;
+                            if (res) {
+                                if (!bestVariantLayer || res.count > bestVariantLayer.count) {
+                                    bestVariantLayer = res;
+                                }
                             }
+                        }
+                        
+                        if (bestVariantLayer) {
+                            bestLayer = bestVariantLayer;
+                            itemToTake = item;
+                            break; // Priority to largest items: pick first item that found a valid layer
                         }
                     }
                     if (!bestLayer) break;
@@ -359,10 +370,6 @@ const Packer = {
             }
         };
 
-        // First pass: Fill pallets with large items
-        packToPallets(mustMainItems);
-
-        // --- PASS 2: PACK MUST-LOWER AND FLEXIBLE INTO LOWER DECK ---
         let lowerDeckResults = [];
         const packToLowerDeck = (targetItems) => {
             if (mainDeckOnlyGlobal) return;
@@ -387,22 +394,35 @@ const Packer = {
                         let d_max = Math.max(hold.door.width, hold.door.height);
                         if (!(i_min <= d_min && i_mid <= d_max)) continue;
 
-                        // When tipping is allowed, use the smallest dim as height (lay it flat)
-                        // The longest dim becomes the "length" stacked along the compartment floor
-                        let itemHeight = item.allowTipping ? item.dims[0] : item.originalDims[2];
-                        // FIX: use the largest remaining dim as itemLen (compartment floor direction)
-                        // dims sorted [small, mid, large]; if allowTipping, height=dims[0], len=dims[2]
-                        // If NOT tipping, original height is dims[2], len=max(dims[0], dims[1])
-                        let itemLen = item.allowTipping ? item.dims[2] : Math.max(item.originalDims[0], item.originalDims[1]);
-                        if (itemHeight > compSpec.max_height_cm) continue;
-
-                        // rows across the hold floor width (using the smallest footprint dim)
-                        let itemFloorW = item.allowTipping ? item.dims[1] : Math.min(item.originalDims[0], item.originalDims[1]);
-                        let rows = Math.floor(hold.floor_width_cm / itemFloorW);
-                        if (rows < 1) rows = 1;
-                        let maxGeo = Math.floor(compSpec.max_length_cm / itemLen) * rows * Math.floor(compSpec.max_height_cm / itemHeight);
-                        if (maxGeo <= 0) continue;
+                        let bestCompFit = null;
+                        for (let variant of item.getVariants()) {
+                            let itemHeight = variant.h;
+                            if (itemHeight > compSpec.max_height_cm) continue;
+                            
+                            let orientations = [
+                                { l: variant.l, w: variant.w },
+                                { l: variant.w, w: variant.l }
+                            ];
+                            
+                            for (let ori of orientations) {
+                                let rows = Math.floor(hold.floor_width_cm / ori.w);
+                                if (rows < 1) continue; // MUST FIT strictly inside floor width
+                                
+                                let maxLayers = Math.floor(compSpec.max_height_cm / itemHeight);
+                                let maxCols = Math.floor(compSpec.max_length_cm / ori.l);
+                                let maxGeo = maxCols * rows * maxLayers;
+                                
+                                if (maxGeo > 0) {
+                                    if (!bestCompFit || maxGeo > bestCompFit.maxGeo) {
+                                        bestCompFit = { maxGeo, h: itemHeight, l: ori.l, w: ori.w };
+                                    }
+                                }
+                            }
+                        }
                         
+                        if (!bestCompFit) continue;
+
+                        let maxGeo = bestCompFit.maxGeo;
                         let item_geo_ratio = 1.0 / maxGeo;
                         let remainingGeo = Math.floor(maxGeo * (1.0 - compData.geo_used_ratio));
 
@@ -415,7 +435,7 @@ const Packer = {
                         if (toTake > 0) {
                             let existing = compData.items.find(i => i.name === item.name);
                             if (existing) existing.count += toTake;
-                            else compData.items.push({ name: item.name, count: toTake, l: itemLen, h: itemHeight, w: itemFloorW, weight: item.weight }); // weight stored for manifest display
+                            else compData.items.push({ name: item.name, count: toTake, l: bestCompFit.l, h: bestCompFit.h, w: bestCompFit.w, weight: item.weight }); // weight stored for manifest display
                             
                             compData.weight += toTake * item.weight;
                             holdRes.current_weight += toTake * item.weight;
@@ -429,15 +449,16 @@ const Packer = {
             }
         };
 
-        // Pack small items into holds
-        packToLowerDeck([...mustLowerItems, ...flexibleItems]);
+        // First pass: Fill pallets with MUST-MAIN items
+        packToPallets(mustMainItems);
 
-        // --- PASS 3: PACK REMAINING FLEXIBLE ITEMS ONTO MAIN DECK PALLETS ---
+        // Second pass: Fill pallets with FLEXIBLE items (Main Deck is priority!)
         packToPallets(flexibleItems);
 
-        // --- PASS 4: FINAL CLEANUP (Try remaining flexible items in Lower Deck again) ---
-        // NOTE: mustMainItems are NEVER sent to lower deck — they either have mainDeckOnly flag
-        // or physically don't fit through the lower deck door.
+        // Third pass: Pack MUST-LOWER items into Lower Deck
+        packToLowerDeck(mustLowerItems);
+
+        // Fourth pass: Pack remaining FLEXIBLE items into Lower Deck
         packToLowerDeck(flexibleItems);
 
         return { pallets, lowerDeck: lowerDeckResults, leftovers: workingItems.filter(i => i.count > 0), aircraftId, maxGrossLimit };
