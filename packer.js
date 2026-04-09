@@ -3,6 +3,11 @@
  * Ported from cargo_calculator.py - High Fidelity Version
  */
 
+// Weight (kg) of the permanently installed technical kit in the AFT lower deck (C4):
+// Spare nose wheel (1), spare main wheel (1), and jack (1) — by airline management decision.
+// This applies to BOTH aircraft (UK75057 and UK75058).
+const TECH_KIT_WEIGHT_KG = 300;
+
 const CONFIG = {
     AIRCRAFT_NAME: "Boeing 757-200 PCF",
     MAX_FUSELAGE_HEIGHT_CM: 208,
@@ -84,9 +89,16 @@ const CONFIG = {
                 },
                 {
                     id: "C4", name: "C4 (AFT)",
-                    max_weight: 5306, max_volume: 30.7,
-                    max_length_cm: 608, max_height_cm: 112,
-                    obstacles: [{ l: 238, w: 72, h: 134, name: "Structural Block" }]
+                    // max_weight reduced by TECH_KIT_WEIGHT_KG (300 kg) for permanently installed
+                    // spare wheels and jack stored in the rear lower baggage compartment.
+                    max_weight: 5306 - TECH_KIT_WEIGHT_KG, // = 5006 kg available for cargo
+                    max_volume: 30.7,
+                    // Structural obstacle occupies 238 cm at the START (nose side) of C4.
+                    // Usable cargo length = 608 - 238 = 370 cm.
+                    max_length_cm: 608 - 238, // = 370 cm usable
+                    max_height_cm: 112,
+                    obstacles: [{ l: 238, w: 72, h: 134, name: "Structural Block" }],
+                    tech_kit_reserved_kg: TECH_KIT_WEIGHT_KG
                 }
             ]
         }

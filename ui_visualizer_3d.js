@@ -64,12 +64,33 @@ class LowerDeckViz {
         // Clear old groups
         this.scene.children = this.scene.children.filter(c => c.type !== 'Group');
 
-        // Define Compartments (Static Geo data from previous visualizer)
+        // Define Compartments with usable dimensions for cargo placement
+        // NOTE: C4 has a 238cm structural obstacle at the START (nose side),
+        // so cargo only fits in the remaining space: 608 - 238 = 370 cm
         const COMP_GEOS = [
-            { id: "C1", pos_x: -905, length: 295, h: 108, w_floor: 120, w_top: 247, obs: [{ l: 140, w: 72, h: 134, x_align: 'end', z_align: 'right', z_offset: 40 }] },
-            { id: "C2", pos_x: -560, length: 560, h: 108, w_floor: 120, w_top: 247, obs: [{ l: 97, w: 70, h: 27, y_align: 'top', z_align: 'right', x_align: 'end' }] },
-            { id: "C3", pos_x: 100, length: 440, h: 112, w_floor: 90, w_top: 247, obs: [] },
-            { id: "C4", pos_x: 540, length: 608, h: 112, w_floor: 90, w_top: 247, obs: [{ l: 238, w: 72, h: 134, x_align: 'start', z_align: 'right', z_offset: 40 }] }
+            {
+                id: "C1", pos_x: -905, length: 295, h: 108, w_floor: 120, w_top: 247,
+                // Obstacle at END (tail side), so cargo fills from start
+                cargo_start_offset: 0, cargo_usable_length: 295 - 140,
+                obs: [{ l: 140, w: 72, h: 134, x_align: 'end', z_align: 'right', z_offset: 40 }]
+            },
+            {
+                id: "C2", pos_x: -560, length: 560, h: 108, w_floor: 120, w_top: 247,
+                cargo_start_offset: 0, cargo_usable_length: 560,
+                obs: [{ l: 97, w: 70, h: 27, y_align: 'top', z_align: 'right', x_align: 'end' }]
+            },
+            {
+                id: "C3", pos_x: 100, length: 440, h: 112, w_floor: 90, w_top: 247,
+                cargo_start_offset: 0, cargo_usable_length: 440,
+                obs: []
+            },
+            {
+                id: "C4", pos_x: 540, length: 608, h: 112, w_floor: 90, w_top: 247,
+                // Obstacle is 238cm at START (nose side) — cargo starts AFTER it
+                cargo_start_offset: 238, cargo_usable_length: 608 - 238,
+                obs: [{ l: 238, w: 72, h: 134, x_align: 'start', z_align: 'right', z_offset: 40 }],
+                tech_kit: true  // Reserved 300kg tech kit (spare wheels + jack)
+            }
         ];
 
         COMP_GEOS.forEach(geo => {
@@ -81,19 +102,51 @@ class LowerDeckViz {
             const hull = this.createHullMesh(geo.length, geo.w_floor, geo.w_top, geo.h);
             group.add(hull);
 
-            // Obstacles
+            // Obstacles (structural blocks)
             geo.obs.forEach(o => {
                 const obsMesh = this.createObstacle(o, geo);
                 group.add(obsMesh);
             });
 
-            // Boxes
+            // Tech kit visual block for C4 — represents the 300 kg spare wheels + jack
+            if (geo.tech_kit) {
+                const tkW = 80, tkH = 60, tkL = 180;
+                const tkGeom = new THREE.BoxGeometry(tkL, tkH, tkW);
+                const tkMat = new THREE.MeshLambertMaterial({ color: 0xf97316 });
+                const tkMesh = new THREE.Mesh(tkGeom, tkMat);
+                // Place at end of compartment (tail side), on the floor
+                tkMesh.position.set(
+                    (geo.length / 2) - (tkL / 2) - 5,  // near tail end
+                    -(geo.h / 2) + (tkH / 2),           // on floor
+                    0
+                );
+                // Orange edges
+                const tkEdges = new THREE.EdgesGeometry(tkGeom);
+                const tkLine = new THREE.LineSegments(tkEdges, new THREE.LineBasicMaterial({ color: 0xfbbf24 }));
+                tkMesh.add(tkLine);
+                group.add(tkMesh);
+
+                // Canvas label "Tech Kit 300kg"
+                const tkLabel = this._makeTextSprite('Tech Kit 300 kg', '#fbbf24');
+                tkLabel.position.set(
+                    (geo.length / 2) - (tkL / 2) - 5,
+                    -(geo.h / 2) + tkH + 30,
+                    0
+                );
+                tkLabel.scale.set(200, 80, 1);
+                group.add(tkLabel);
+            }
+
+            // Boxes — placed in the usable zone only
             const resultComp = results.lowerDeck.flatMap(h => h.compartments).find(c => c.id === geo.id);
             if (resultComp) {
-                let startX = -(geo.length / 2);
-                if (geo.id === "C4") startX += 238;
+                // startX is relative to the group center (which is at geo.pos_x + length/2)
+                // Group local X=0 is the center of the compartment
+                // So local X range: [-length/2 .. +length/2]
+                const usableStart = -(geo.length / 2) + geo.cargo_start_offset;
+                const usableEnd   = usableStart + geo.cargo_usable_length;
 
-                let curX = 0;
+                let curX = 0; // offset from usableStart
                 let curY = 0;
                 let curZ = 0;
                 let rowMaxH = 0;
@@ -105,23 +158,24 @@ class LowerDeckViz {
                     const bW = itemBatch.w || 50;
 
                     for (let i = 0; i < itemBatch.count; i++) {
-                        // Check if it fits in Z (width)
+                        // Advance Z (width) row
                         if (curZ + bW > geo.w_floor) {
                             curZ = 0;
-                            curY += rowMaxH + 2; // small gap
+                            curY += rowMaxH + 2;
                             rowMaxH = 0;
                         }
-                        // Check if it fits in Y (height)
+                        // Advance Y (height) — new X slice
                         if (curY + bH > geo.h) {
                             curY = 0;
                             curZ = 0;
-                            curX += sliceMaxL + 5; // advance slice
+                            curX += sliceMaxL + 5;
                             sliceMaxL = 0;
                             rowMaxH = 0;
                         }
+                        // BOUNDARY CLAMP: never place boxes beyond usable length
+                        if (usableStart + curX + bL > usableEnd) break;
 
-                        // Local coordinates within the compartment
-                        const xPos = startX + curX + (bL / 2);
+                        const xPos = usableStart + curX + (bL / 2);
                         const yPos = -(geo.h / 2) + curY + (bH / 2);
                         const zPos = -(geo.w_floor / 2) + curZ + (bW / 2);
 
@@ -129,7 +183,6 @@ class LowerDeckViz {
                         box.position.set(xPos, yPos, zPos);
                         group.add(box);
 
-                        // Advance Z
                         curZ += bW + 2;
                         if (bH > rowMaxH) rowMaxH = bH;
                         if (bL > sliceMaxL) sliceMaxL = bL;
@@ -141,6 +194,21 @@ class LowerDeckViz {
         });
 
         this.addIndicators();
+    }
+
+    _makeTextSprite(text, color) {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 512; canvas.height = 128;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = color;
+        ctx.font = 'bold 52px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, 256, 64);
+        const tex = new THREE.CanvasTexture(canvas);
+        const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+        return new THREE.Sprite(mat);
     }
 
     addIndicators() {

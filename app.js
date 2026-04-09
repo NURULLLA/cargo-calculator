@@ -564,14 +564,30 @@ class CargoApp {
         this.results.lowerDeck.forEach(hold => {
             hold.compartments.forEach(comp => {
                 const compBoxes = comp.items.reduce((acc, i) => acc + i.count, 0);
-                if (compBoxes === 0) return;
+
+                // Always show C4 even if no cargo — because it has the tech kit reservation
+                const isC4 = comp.id === 'C4';
+                if (compBoxes === 0 && !isC4) return;
+
                 const item = document.createElement('div');
                 item.className = 'report-item';
+
+                // For C4, show tech kit reservation badge
+                const techKitBadge = isC4
+                    ? `<span style="display:inline-block;margin-top:4px;padding:2px 8px;border-radius:12px;
+                        background:#f9731622;border:1px solid #f97316;color:#f97316;font-size:0.75em;">
+                        🔧 Tech Kit (spare wheels + jack): <strong>300 kg</strong> reserved
+                       </span>`
+                    : '';
+
                 item.innerHTML = `
-                    <span><strong>${comp.name}</strong> - ${compBoxes} boxes</span>
-                    <span>${comp.weight.toLocaleString()} kg</span>
+                    <span><strong>${comp.name}</strong>${compBoxes > 0 ? ` - ${compBoxes} boxes` : ' — no bulk cargo'}</span>
+                    <span>${comp.weight.toLocaleString()} kg${isC4 ? ' <small style="color:var(--text-muted)">(+300 reserved)</small>' : ''}</span>
+                    ${techKitBadge ? `<div style="grid-column:1/-1;">${techKitBadge}</div>` : ''}
                 `;
                 container.appendChild(item);
+
+                if (compBoxes === 0) return; // no manifest to show
 
                 // Add Details Button for Lower Deck
                 const btn = document.createElement('button');
