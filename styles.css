@@ -622,39 +622,147 @@ td {
 
 
 
-/* Summary */
-
-.summary-grid {
-
-    display: grid;
-
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-
-    gap: 1.5rem;
-
-    margin-bottom: 1.5rem;
-
+/* Summary — compact stat bar */
+.summary-stats-bar {
+    display: flex;
+    align-items: stretch;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 1rem;
+    padding: 0;
+    margin-bottom: 1.25rem;
+    overflow: hidden;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
 }
 
+.stat-pill {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    flex: 1;
+    padding: 1rem 1.25rem;
+    transition: background 0.18s;
+}
 
+.stat-pill:hover {
+    background: rgba(255,255,255,0.03);
+}
 
-.big-number {
+.stat-pill-divider {
+    width: 1px;
+    background: var(--border);
+    align-self: stretch;
+    margin: 0.6rem 0;
+    flex-shrink: 0;
+}
 
-    font-size: 2.5rem;
-
-    font-weight: 800;
-
+.stat-pill-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 0.55rem;
+    background: rgba(56, 189, 248, 0.12);
     color: var(--accent);
-
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.95rem;
+    flex-shrink: 0;
 }
 
+.stat-pill-icon.accent-md {
+    background: rgba(139, 92, 246, 0.12);
+    color: #a78bfa;
+}
 
+.stat-pill-icon.accent-ld {
+    background: rgba(20, 184, 166, 0.12);
+    color: #2dd4bf;
+}
 
-.error-card .big-number {
-
+.stat-pill-icon.accent-warn {
+    background: rgba(239, 68, 68, 0.1);
     color: var(--danger);
-
 }
+
+.stat-pill-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
+}
+
+.stat-pill-label {
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.stat-pill-value {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text-main);
+    line-height: 1.2;
+}
+
+.stat-pill-value .stat-pill-sub {
+    font-size: 0.72rem;
+    font-weight: 400;
+    color: var(--text-muted);
+}
+
+.stat-pill-meta {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    margin-top: 0.1rem;
+}
+
+.danger-val {
+    color: var(--danger) !important;
+}
+
+/* weight pill — special multi-line content */
+#stat-pill-weight .stat-pill-value {
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--text-main);
+    line-height: 1.5;
+}
+
+#stat-pill-weight .stat-pill-value .wt-gross {
+    font-size: 0.75rem;
+    color: var(--accent);
+    font-weight: 600;
+}
+
+#stat-pill-weight .stat-pill-value .wt-net {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+#stat-pill-weight .stat-pill-value .wt-warn {
+    font-size: 0.7rem;
+    color: var(--danger);
+}
+
+/* leftover card redesign */
+.leftover-card-header {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 0.75rem;
+    color: var(--danger);
+}
+
+.leftover-card-header h4 {
+    margin: 0;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+
 
 
 
@@ -824,10 +932,7 @@ td {
     }
 }
 
-.summary-grid {
-    grid-template-columns: 1fr;
-}
-
+@media (max-width: 768px) {
     .summary-grid {
         grid-template-columns: 1fr;
     }
@@ -949,4 +1054,22 @@ td {
 .btn-sm {
     padding: 0.4rem 0.8rem;
     font-size: 0.85rem;
+}
+
+/* Flight Plan Card — full-width inside summary-grid */
+#flight-plan-card {
+    grid-column: 1 / -1;
+    border-top: 4px solid var(--accent);
+}
+
+#flight-plan-card table th,
+#flight-plan-card table td {
+    padding: 5px 6px;
+    border-top: 1px solid var(--border);
+    font-size: 0.82rem;
+}
+
+#flight-plan-card table thead th {
+    border-top: none;
+    padding-bottom: 6px;
 }

@@ -107,7 +107,7 @@ class CargoApp {
             return;
         }
 
-        const headers = rows[0].map(h => String(h || '').trim().toLowerCase());
+        const headers = Array.from(rows[0] || []).map(h => String(h || '').trim().toLowerCase());
         const dataRows = rows.slice(1);
 
         // Fuzzy Column Mapping
@@ -344,6 +344,8 @@ class CargoApp {
         const aircraftId = document.getElementById('aircraft-select').value;
         try {
             this.results = Packer.packAircraft(configCode, this.cargo, { aircraftId });
+            // Calculate total flights needed for all cargo
+            this.flightPlan = Packer.calculateTotalFlights(configCode, this.cargo, { aircraftId });
         } catch (e) {
             console.error("Packer Error:", e);
             alert("Calculation Error: " + e.message);
@@ -351,6 +353,7 @@ class CargoApp {
         }
 
         console.log("Pack Results:", this.results);
+        console.log("Flight Plan:", this.flightPlan);
         this.renderResultsUI(configCode);
         this.switchTab('summary-tab');
     }
@@ -396,19 +399,13 @@ class CargoApp {
         const netColor = isNetOverload ? '#ef4444' : 'var(--text)';
 
         document.getElementById('total-weight').innerHTML = `
-            <div style="margin-bottom: 10px; border-bottom: 1px solid var(--border); padding-bottom: 10px;">
-                <small style="color:var(--text-muted); display:block; margin-bottom:4px;">REQUESTED LOAD</small>
-                <span style="color:${netColor}; font-weight:bold;">Net: ${requestedNet.toLocaleString()} / ${maxNetCapability.toLocaleString()} kg</span>
-                ${isNetOverload ? '<br><small style="color:#ef4444;"><i class="fas fa-exclamation-triangle"></i> Structural Limit Exceeded</small>' : ''}
-            </div>
-            <div style="margin-bottom: 10px;">
-                <small style="color:var(--text-muted); display:block; margin-bottom:4px;">ACTUAL LOADED (GROSS PAYLOAD)</small>
-                Net: ${totalW.toLocaleString()} kg<br>
-                <span style="font-size:0.85em; color:${limitColor}; font-weight:bold;">Gross: ${totalGross.toLocaleString()} / ${maxLimit.toLocaleString()} kg (${loadPercentage}%)</span>
-            </div>
-            <div style="font-size:0.8em; color:var(--text-muted);">
-                Vol: ${totalVolume.toFixed(2)} m³ | Tare: ${totalTare.toLocaleString()} kg
-            </div>
+            <span class="wt-gross">
+                ${isNetOverload ? '<i class="fas fa-triangle-exclamation" style="color:var(--danger);margin-right:3px;"></i>' : ''}
+                Gross: ${totalGross.toLocaleString()} / ${maxLimit.toLocaleString()} kg <span style="color:var(--text-muted);font-weight:400;">(${loadPercentage}%)</span>
+            </span>
+            <span class="wt-net">Net loaded: ${totalW.toLocaleString()} kg &nbsp;·&nbsp; Vol: ${totalVolume.toFixed(1)} m³</span>
+            <span class="wt-net">Requested: ${requestedNet.toLocaleString()} kg &nbsp;·&nbsp; Tare: ${totalTare.toLocaleString()} kg</span>
+            ${isNetOverload ? '<span class="wt-warn"><i class="fas fa-exclamation-triangle"></i> Structural limit exceeded</span>' : ''}
         `;
 
         // Total Boxes Calculation
@@ -426,7 +423,11 @@ class CargoApp {
         const ldWeight = this.results.lowerDeck.reduce((acc, h) => acc + h.current_weight, 0);
         document.getElementById('md-payload').textContent = mdWeight.toLocaleString();
         document.getElementById('ld-payload').textContent = ldWeight.toLocaleString();
-        document.getElementById('md-pos').textContent = `${this.results.pallets.filter(p => p.currentWeight > 0).length}/${CONFIG.PALLET_OPTIONS[configCode].count}`;
+        const filledPos = this.results.pallets.filter(p => p.currentWeight > 0).length;
+        const totalPos = CONFIG.PALLET_OPTIONS[configCode].count;
+        document.getElementById('md-pos').textContent = `${filledPos}/${totalPos}`;
+        const mdPosSummary = document.getElementById('md-pos-summary');
+        if (mdPosSummary) mdPosSummary.textContent = `${filledPos} / ${totalPos} positions`;
 
         const leftoversCount = this.results.leftovers.reduce((acc, i) => acc + i.count, 0);
         document.getElementById('total-leftovers').textContent = leftoversCount;
@@ -436,22 +437,102 @@ class CargoApp {
         leftoverList.innerHTML = '';
 
         if (leftoversCount > 0) {
-            leftoverCard.classList.add('error-card');
+            leftoverCard.style.display = 'block';
             this.results.leftovers.forEach(item => {
                 const div = document.createElement('div');
                 div.className = 'leftover-item';
-                div.style.padding = '0.5rem';
-                div.style.borderBottom = '1px solid var(--border)';
-                const reason = item.lowerDeckOnly ? 'LowerDeckOnly — too large for any hold door' : 'Could not fit (Limit or Space)';
-                div.innerHTML = `<strong>${item.name}</strong>: ${item.count} units — ${reason}`;
+                div.style.cssText = 'padding:0.4rem 0.2rem; border-bottom:1px solid var(--border); font-size:0.85rem;';
+                const reason = item.lowerDeckOnly ? 'LowerDeckOnly — too large for any hold door'
+                    : item.weight > 75 ? 'Lower Deck Only — exceeds 75 kg manual handling limit'
+                    : 'Could not fit (Limit or Space)';
+                div.innerHTML = `<strong>${item.name}</strong>: <span style="color:var(--danger)">${item.count} units</span> — <span style="color:var(--text-muted)">${reason}</span>`;
                 leftoverList.appendChild(div);
             });
         } else {
-            leftoverCard.classList.remove('error-card');
+            leftoverCard.style.display = 'none';
         }
+
+        // ─── FLIGHT PLAN PANEL ─────────────────────────────────────────────
+        this.renderFlightPlan();
+        // ────────────────────────────────────────────────────────────────────
 
         // Render Report
         this.renderReport();
+    }
+
+    renderFlightPlan() {
+        // Find or create the flight-plan card in the summary tab
+        let card = document.getElementById('flight-plan-card');
+        if (!card) {
+            // Create the card and inject it after the leftover-card
+            card = document.createElement('div');
+            card.id = 'flight-plan-card';
+            card.className = 'card';
+            const leftoverCard = document.getElementById('leftover-card');
+            if (leftoverCard && leftoverCard.parentNode) {
+                leftoverCard.parentNode.insertBefore(card, leftoverCard.nextSibling);
+            } else {
+                document.getElementById('summary-tab').appendChild(card);
+            }
+        }
+
+        const fp = this.flightPlan;
+        if (!fp) { card.style.display = 'none'; return; }
+        card.style.display = '';
+
+        const totalBoxes = this.cargo.reduce((acc, i) => acc + i.count, 0);
+        const statusColor = fp.allCleared ? '#10b981' : '#f59e0b';
+        const statusText  = fp.allCleared ? '✅ All cargo cleared' : '⚠️ Some cargo cannot be loaded (physical limits)';
+
+        let html = `
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.75rem;">
+                <h3 style="margin:0; font-size:1rem; color:var(--text);"><i class="fas fa-plane"></i> Flights Required</h3>
+                <span style="background:${statusColor}22; color:${statusColor}; border:1px solid ${statusColor}44;
+                    padding:3px 10px; border-radius:20px; font-size:0.8rem; font-weight:600;">
+                    ${fp.totalFlights} flight${fp.totalFlights !== 1 ? 's' : ''}
+                </span>
+            </div>
+            <p style="font-size:0.82rem; color:var(--text-muted); margin:0 0 0.75rem;">
+                Total cargo: <strong>${totalBoxes.toLocaleString()} units</strong> — ${statusText}
+            </p>
+            <table style="width:100%; border-collapse:collapse; font-size:0.82rem;">
+                <thead>
+                    <tr style="border-bottom:2px solid var(--border); color:var(--text-muted);">
+                        <th style="text-align:left; padding:4px 6px;">Flight #</th>
+                        <th style="text-align:right; padding:4px 6px;">Loaded</th>
+                        <th style="text-align:right; padding:4px 6px;">Main Deck</th>
+                        <th style="text-align:right; padding:4px 6px;">Lower Deck</th>
+                        <th style="text-align:right; padding:4px 6px;">Remaining</th>
+                    </tr>
+                </thead>
+                <tbody>`;
+
+        fp.flightBreakdown.forEach((f, idx) => {
+            const rowBg = idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.03)';
+            const accentFlightNum = f.flightNum === 1 ? 'var(--accent)' : 'var(--text)';
+            html += `
+                <tr style="background:${rowBg};">
+                    <td style="padding:5px 6px; color:${accentFlightNum}; font-weight:${f.flightNum===1?'700':'400'};">✈ Flight ${f.flightNum}${f.flightNum===1?' <small style="color:var(--text-muted);">(current)</small>':''}</td>
+                    <td style="text-align:right; padding:5px 6px; font-weight:600;">${f.loaded.toLocaleString()}</td>
+                    <td style="text-align:right; padding:5px 6px; color:var(--text-muted);">${f.mdLoaded.toLocaleString()}</td>
+                    <td style="text-align:right; padding:5px 6px; color:var(--text-muted);">${f.ldLoaded.toLocaleString()}</td>
+                    <td style="text-align:right; padding:5px 6px; color:${f.leftoverCount > 0 ? '#f59e0b' : '#10b981'}; font-weight:600;">${f.leftoverCount.toLocaleString()}</td>
+                </tr>`;
+        });
+
+        html += `</tbody></table>`;
+
+        if (!fp.allCleared) {
+            const stuck = fp.flightBreakdown[fp.flightBreakdown.length - 1]?.leftovers || [];
+            if (stuck.length > 0) {
+                html += `<div style="margin-top:0.75rem; padding:0.5rem; background:#f59e0b11; border:1px solid #f59e0b44; border-radius:6px; font-size:0.8rem; color:#f59e0b;">
+                    <strong>⚠ Cannot be loaded (physical constraints):</strong><br>
+                    ${stuck.map(i => `${i.name}: ${i.count} units`).join('<br>')}
+                </div>`;
+            }
+        }
+
+        card.innerHTML = html;
     }
 
     renderReport() {
@@ -574,7 +655,7 @@ class CargoApp {
 
         // Parse TSV (tab-separated, as copied from Excel)
         const rows = lines.map(l => l.split('\t').map(c => c.trim()));
-        const headers = rows[0].map(h => h.toLowerCase());
+        const headers = Array.from(rows[0] || []).map(h => String(h || '').trim().toLowerCase());
 
         const findCol = (aliases) => {
             let idx = headers.findIndex(h => aliases.some(a => h === a));

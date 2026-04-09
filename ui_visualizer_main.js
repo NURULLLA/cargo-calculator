@@ -95,8 +95,9 @@ class MainDeckViz {
 
                 const dimZ = layer.dim_cross;
                 const dimX = layer.dim_long;
-                const colsZ = layer.meta.main.r; // Items along Z
-                const rowsX = layer.meta.main.c; // Items along X
+                // packer.js: meta.main.r = rows along the long axis (X), meta.main.c = cols along the cross axis (Z)
+                const rowsX = layer.meta.main.r; // Items along pallet length (X)
+                const colsZ = layer.meta.main.c; // Items along pallet width (Z)
 
                 const paletteWidthZ = p.config.length_cross;
                 const paletteLengthX = p.config.width_long;
@@ -141,10 +142,11 @@ class MainDeckViz {
                     // So Side Item Z-dim = dimLong. Side Item X-dim = dimCross.
                     // Yes, rotated.
 
-                    const sDimZ = dimX; // dimLong
-                    const sDimX = dimZ; // dimCross
-                    const sColsZ = layer.meta.side.c; // Corrected: meta.side.c is cols (Z)
-                    const sRowsX = layer.meta.side.r; // Corrected: meta.side.r is rows (X)
+                    const sDimZ = dimX; // side block uses dimLong as its Z-dim (rotated)
+                    const sDimX = dimZ; // side block uses dimCross as its X-dim (rotated)
+                    // packer.js: meta.side.r = rows along X (sRows), meta.side.c = cols along Z (sCols)
+                    const sRowsX = layer.meta.side.r; // Items along X in side block
+                    const sColsZ = layer.meta.side.c; // Items along Z in side block
 
                     const sideStartZ = startZ + (colsZ * dimZ);
                     // Side block starts after the main block in Z axis

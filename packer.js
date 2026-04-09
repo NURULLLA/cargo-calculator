@@ -138,6 +138,10 @@ class CargoItem {
     constructor(id, name, length, width, height, weight, count, allowTipping = false, noStack = false) {
         this.id = id;
         this.name = name;
+        // Store raw dimensions explicitly so spread-clones pass correct values to packAircraft()
+        this.length = length;
+        this.width = width;
+        this.height = height;
         this.dims = [length, width, height].sort((a, b) => a - b);
         this.originalDims = [length, width, height];
         this.weight = weight;
@@ -218,15 +222,18 @@ const Packer = {
             // rows = how many boxes fit along the pallet length (long direction)
             let cols = Math.floor(availCross / dimCross);
             let rows = Math.floor(availLong / dimLong);
+            if (cols < 1 || rows < 1) return { total: 0, meta: { main: { r: 0, c: 0 }, side: null } };
             let countMain = cols * rows;
             let remCross = availCross - (cols * dimCross);
             let sideMeta = null;
+            // Side-block: rotate remaining cross-space, only if at least 1 col and 1 row fit
             if (remCross >= dimLong && availLong >= dimCross) {
                 let sCols = Math.floor(remCross / dimLong);
                 let sRows = Math.floor(availLong / dimCross);
-                sideMeta = { r: sRows, c: sCols, count: sCols * sRows };
+                if (sCols >= 1 && sRows >= 1) {
+                    sideMeta = { r: sRows, c: sCols, count: sCols * sRows };
+                }
             }
-            // FIX: r = rows (along long axis), c = cols (along cross axis) — consistent naming
             return { total: countMain + (sideMeta ? sideMeta.count : 0), meta: { main: { r: rows, c: cols }, side: sideMeta } };
         }
 
@@ -389,10 +396,16 @@ const Packer = {
                         if (item.count <= 0) continue;
                         if (currentTotalGross >= maxGrossLimit) break;
 
+                        // BUG FIX: Also enforce hold-level total weight cap
+                        if (holdRes.current_weight >= hold.max_weight) break;
+
                         let [i_min, i_mid] = item.dims;
                         let d_min = Math.min(hold.door.width, hold.door.height);
                         let d_max = Math.max(hold.door.width, hold.door.height);
                         if (!(i_min <= d_min && i_mid <= d_max)) continue;
+
+                        // LOWER DECK WEIGHT LIMIT: Ground crew cannot manually lift > 75 kg per box
+                        if (item.weight > 75) continue;
 
                         let bestCompFit = null;
                         for (let variant of item.getVariants()) {
@@ -424,18 +437,23 @@ const Packer = {
 
                         let maxGeo = bestCompFit.maxGeo;
                         let item_geo_ratio = 1.0 / maxGeo;
-                        let remainingGeo = Math.floor(maxGeo * (1.0 - compData.geo_used_ratio));
+                        // BUG FIX: Clamp geo_used_ratio to [0, 1] before computing remaining space
+                        let safeGeoUsed = Math.min(compData.geo_used_ratio, 1.0);
+                        let remainingGeo = Math.max(0, Math.floor(maxGeo * (1.0 - safeGeoUsed)));
 
                         let toTake = Math.min(item.count, remainingGeo);
                         let wTake = Math.floor((compSpec.max_weight - compData.weight) / item.weight);
                         toTake = Math.min(toTake, wTake);
+                        // BUG FIX: Also cap by hold-level remaining weight capacity
+                        let holdTake = Math.floor((hold.max_weight - holdRes.current_weight) / item.weight);
+                        toTake = Math.min(toTake, holdTake);
                         let aircraftTake = Math.floor((maxGrossLimit - currentTotalGross) / item.weight);
                         toTake = Math.min(toTake, aircraftTake);
 
                         if (toTake > 0) {
                             let existing = compData.items.find(i => i.name === item.name);
                             if (existing) existing.count += toTake;
-                            else compData.items.push({ name: item.name, count: toTake, l: bestCompFit.l, h: bestCompFit.h, w: bestCompFit.w, weight: item.weight }); // weight stored for manifest display
+                            else compData.items.push({ name: item.name, count: toTake, l: bestCompFit.l, h: bestCompFit.h, w: bestCompFit.w, weight: item.weight });
                             
                             compData.weight += toTake * item.weight;
                             holdRes.current_weight += toTake * item.weight;
@@ -462,6 +480,70 @@ const Packer = {
         packToLowerDeck(flexibleItems);
 
         return { pallets, lowerDeck: lowerDeckResults, leftovers: workingItems.filter(i => i.count > 0), aircraftId, maxGrossLimit };
+    },
+
+    /**
+     * Calculates the total number of flights required to transport ALL cargo items.
+     * Simulates repeated packing passes (one per flight) until no cargo remains.
+     *
+     * @param {string} configCode  - Pallet config: "PAG" or "PMC"
+     * @param {Array}  cargoItems  - Original full cargo list (not mutated)
+     * @param {Object} options     - Same options as packAircraft
+     * @returns {Object} { totalFlights, flightBreakdown }
+     *   flightBreakdown: Array of { flightNum, loaded, leftovers } per flight
+     */
+    calculateTotalFlights: (configCode, cargoItems, options = {}) => {
+        // Deep-clone the cargo so we don't mutate the caller's list
+        let remaining = cargoItems
+            .filter(i => i.count > 0)
+            .map(i => ({ ...i, count: i.count }));
+
+        const flightBreakdown = [];
+        let flightNum = 0;
+        const MAX_FLIGHTS = 100; // Safety cap — prevent infinite loops
+
+        while (remaining.some(i => i.count > 0) && flightNum < MAX_FLIGHTS) {
+            flightNum++;
+
+            // Run a full pack simulation for this flight
+            const result = Packer.packAircraft(configCode, remaining, options);
+
+            // Count how many were loaded this flight
+            const mdLoaded = result.pallets.reduce(
+                (acc, p) => acc + p.layers.reduce((la, l) => la + l.count, 0), 0
+            );
+            const ldLoaded = result.lowerDeck.reduce(
+                (acc, h) => acc + h.compartments.reduce(
+                    (ca, c) => ca + c.items.reduce((ia, i) => ia + i.count, 0), 0
+                ), 0
+            );
+            const totalLoaded = mdLoaded + ldLoaded;
+
+            const leftoverCount = result.leftovers.reduce((acc, i) => acc + i.count, 0);
+
+            flightBreakdown.push({
+                flightNum,
+                loaded: totalLoaded,
+                mdLoaded,
+                ldLoaded,
+                leftoverCount,
+                leftovers: result.leftovers.map(i => ({ name: i.name, count: i.count }))
+            });
+
+            // If nothing was loaded this flight, we're stuck — break to avoid infinite loop
+            if (totalLoaded === 0) break;
+
+            // Advance remaining = only the leftovers after this flight
+            remaining = result.leftovers
+                .filter(i => i.count > 0)
+                .map(i => ({ ...i, count: i.count }));
+        }
+
+        return {
+            totalFlights: flightNum,
+            flightBreakdown,
+            allCleared: remaining.every(i => i.count === 0)
+        };
     }
 };
 

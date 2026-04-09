@@ -178,27 +178,50 @@
 
                 <!-- Summary Tab -->
                 <section id="summary-tab" class="tab-panel">
-                    <div class="summary-grid">
-                        <div class="card highlight-card">
-                            <h4>Overall Weight</h4>
-                            <div class="big-number" id="total-weight">0 kg</div>
+
+                    <!-- Compact Stats Bar -->
+                    <div class="summary-stats-bar">
+                        <div class="stat-pill" id="stat-pill-weight">
+                            <div class="stat-pill-icon"><i class="fas fa-weight-hanging"></i></div>
+                            <div class="stat-pill-body">
+                                <span class="stat-pill-label">Overall Weight</span>
+                                <div class="stat-pill-value" id="total-weight">— kg</div>
+                            </div>
                         </div>
-                        <div class="card">
-                            <h4>Main Deck Total</h4>
-                            <div class="big-number" id="md-total-boxes">0</div>
-                            <p>Boxes placed on pallets</p>
+                        <div class="stat-pill-divider"></div>
+                        <div class="stat-pill">
+                            <div class="stat-pill-icon accent-md"><i class="fas fa-layer-group"></i></div>
+                            <div class="stat-pill-body">
+                                <span class="stat-pill-label">Main Deck</span>
+                                <div class="stat-pill-value"><span id="md-total-boxes">0</span> <span class="stat-pill-sub">boxes</span></div>
+                                <span class="stat-pill-meta" id="md-pos-summary"></span>
+                            </div>
                         </div>
-                        <div class="card">
-                            <h4>Lower Deck Total</h4>
-                            <div class="big-number" id="ld-total-boxes">0</div>
-                            <p>Boxes placed in holds</p>
+                        <div class="stat-pill-divider"></div>
+                        <div class="stat-pill">
+                            <div class="stat-pill-icon accent-ld"><i class="fas fa-database"></i></div>
+                            <div class="stat-pill-body">
+                                <span class="stat-pill-label">Lower Deck</span>
+                                <div class="stat-pill-value"><span id="ld-total-boxes">0</span> <span class="stat-pill-sub">boxes</span></div>
+                            </div>
                         </div>
-                        <div class="card error-card" id="leftover-card">
-                            <h4>Left Behind</h4>
-                            <div class="big-number" id="total-leftovers">0</div>
-                            <p>Items could not fit within limits.</p>
-                            <div id="leftover-list" class="leftover-details"></div>
+                        <div class="stat-pill-divider"></div>
+                        <div class="stat-pill" id="leftover-pill">
+                            <div class="stat-pill-icon accent-warn"><i class="fas fa-box-open"></i></div>
+                            <div class="stat-pill-body">
+                                <span class="stat-pill-label">Left Behind</span>
+                                <div class="stat-pill-value danger-val"><span id="total-leftovers">0</span> <span class="stat-pill-sub">items</span></div>
+                            </div>
                         </div>
+                    </div>
+
+                    <!-- Leftover details (hidden when 0) -->
+                    <div class="card error-card" id="leftover-card" style="display:none;">
+                        <div class="leftover-card-header">
+                            <i class="fas fa-triangle-exclamation"></i>
+                            <h4>Items Left Behind</h4>
+                        </div>
+                        <div id="leftover-list" class="leftover-details"></div>
                     </div>
 
                     <div class="card">
