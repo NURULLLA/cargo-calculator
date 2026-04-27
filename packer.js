@@ -229,28 +229,54 @@ const Packer = {
 
         if (availCross < Math.min(variant.l, variant.w)) return null;
 
-        function tryOrientation(dimCross, dimLong) {
-            // cols = how many boxes fit across the fuselage width (cross direction)
-            // rows = how many boxes fit along the pallet length (long direction)
-            let cols = Math.floor(availCross / dimCross);
-            let rows = Math.floor(availLong / dimLong);
-            if (cols < 1 || rows < 1) return { total: 0, meta: { main: { r: 0, c: 0 }, side: null } };
-            let countMain = cols * rows;
-            let remCross = availCross - (cols * dimCross);
-            let sideMeta = null;
-            // Side-block: rotate remaining cross-space, only if at least 1 col and 1 row fit
-            if (remCross >= dimLong && availLong >= dimCross) {
-                let sCols = Math.floor(remCross / dimLong);
-                let sRows = Math.floor(availLong / dimCross);
-                if (sCols >= 1 && sRows >= 1) {
-                    sideMeta = { r: sRows, c: sCols, count: sCols * sRows };
+        /**
+         * Enhanced Two-Block Partitioning for Identical Rectangles
+         * Tries various ways to split the area into two blocks and fill each with different orientations.
+         */
+        function tryPartition(dimCross, dimLong) {
+            let bestSplit = { total: 0, meta: { main: { r: 0, c: 0 }, side: null } };
+
+            // 1. Vertical Split: Primary grid on the left, rotated items on the right gap
+            let colsV = Math.floor(availCross / dimCross);
+            let rowsV = Math.floor(availLong / dimLong);
+            if (colsV >= 1 && rowsV >= 1) {
+                let totalV = colsV * rowsV;
+                let remWidth = availCross - (colsV * dimCross);
+                let sideV = null;
+                if (remWidth >= dimLong && availLong >= dimCross) {
+                    let sCols = Math.floor(remWidth / dimLong);
+                    let sRows = Math.floor(availLong / dimCross);
+                    sideV = { r: sRows, c: sCols, count: sCols * sRows };
+                    totalV += sideV.count;
+                }
+                if (totalV > bestSplit.total) {
+                    bestSplit = { total: totalV, meta: { main: { r: rowsV, c: colsV }, side: sideV } };
                 }
             }
-            return { total: countMain + (sideMeta ? sideMeta.count : 0), meta: { main: { r: rows, c: cols }, side: sideMeta } };
+
+            // 2. Horizontal Split: Primary grid at the bottom, rotated items in the top gap
+            let rowsH = Math.floor(availLong / dimLong);
+            let colsH = Math.floor(availCross / dimCross);
+            if (rowsH >= 1 && colsH >= 1) {
+                let totalH = rowsH * colsH;
+                let remLength = availLong - (rowsH * dimLong);
+                let sideH = null;
+                if (remLength >= dimCross && availCross >= dimLong) {
+                    let sRows = Math.floor(remLength / dimCross);
+                    let sCols = Math.floor(availCross / dimLong);
+                    sideH = { r: sRows, c: sCols, count: sCols * sRows, type: 'HORIZONTAL' };
+                    totalH += sideH.count;
+                }
+                if (totalH > bestSplit.total) {
+                    bestSplit = { total: totalH, meta: { main: { r: rowsH, c: colsH }, side: sideH } };
+                }
+            }
+
+            return bestSplit;
         }
 
-        let a = tryOrientation(variant.l, variant.w);
-        let b = tryOrientation(variant.w, variant.l);
+        let a = tryPartition(variant.l, variant.w);
+        let b = tryPartition(variant.w, variant.l);
         let best = a.total >= b.total ? { ...a, type: 'A' } : { ...b, type: 'B' };
 
         if (best.total === 0) return null;
@@ -305,12 +331,9 @@ const Packer = {
         };
 
         // Split items based on where they CAN and SHOULD go
-        // NOTE: lowerDeckOnly items that don't fit the door are excluded from mustMain —
-        // they are physically impossible to load and will appear as leftovers.
         const mustMainItems = workingItems.filter(i => !i.lowerDeckOnly && (i.mainDeckOnly || !fitsInAnyLowerDoor(i)));
         const flexibleItems = workingItems.filter(i => !i.mainDeckOnly && !i.lowerDeckOnly && fitsInAnyLowerDoor(i));
         const mustLowerItems = workingItems.filter(i => i.lowerDeckOnly && fitsInAnyLowerDoor(i));
-        // lowerDeckOnly items that don't fit ANY lower deck door → stay in workingItems untouched → become leftovers
 
         // Sorting for Main Deck: Big volume first
         const sortForMain = (items) => items.sort((a, b) => {
@@ -318,7 +341,7 @@ const Packer = {
             return b.volumeM3 - a.volumeM3;
         });
 
-        // --- PASS 1: PACK MUST-MAIN ON MAIN DECK ---
+        // --- PASS 1: PACK ON MAIN DECK ---
         let pallets = [];
         for (let i = 1; i <= config.count; i++) {
             pallets.push(new Pallet(i, config));
@@ -331,7 +354,7 @@ const Packer = {
                     if (targetItems.every(x => x.count === 0)) break;
                     if (currentTotalGross >= maxGrossLimit) break;
 
-                    let bestLayer = null;
+                    let bestLayerCandidate = null;
                     let itemToTake = null;
                     
                     for (let item of targetItems) {
@@ -340,48 +363,60 @@ const Packer = {
                         if (p.remainingWeight() < item.weight) continue;
                         if (currentTotalGross + item.weight > maxGrossLimit) continue;
                         
-                        let bestVariantLayer = null;
+                        let bestVariantResult = null;
+                        let maxTotalPotential = -1;
+
                         for (let variant of item.getVariants()) {
                             let res = Packer.calculateLayer(p, variant);
                             if (res) {
-                                if (!bestVariantLayer || res.count > bestVariantLayer.count) {
-                                    bestVariantLayer = res;
+                                // Optimization: Pick the variant that maximizes TOTAL pallet count for this item,
+                                // not just the count in a single layer.
+                                let layersPossible = 1;
+                                if (!item.noStack) {
+                                    let remHeight = config.max_height - (p.currentHeight + variant.h);
+                                    layersPossible = 1 + Math.floor(remHeight / variant.h);
+                                }
+                                let totalPotential = res.count * layersPossible;
+
+                                if (totalPotential > maxTotalPotential) {
+                                    maxTotalPotential = totalPotential;
+                                    bestVariantResult = res;
                                 }
                             }
                         }
                         
-                        if (bestVariantLayer) {
-                            bestLayer = bestVariantLayer;
+                        if (bestVariantResult) {
+                            bestLayerCandidate = bestVariantResult;
                             itemToTake = item;
-                            break; // Priority to largest items: pick first item that found a valid layer
+                            break; 
                         }
                     }
-                    if (!bestLayer) break;
+                    if (!bestLayerCandidate) break;
 
-                    let toTake = Math.min(bestLayer.count, itemToTake.count);
-                    if (p.remainingWeight() < toTake * bestLayer.weight) {
+                    let toTake = Math.min(bestLayerCandidate.count, itemToTake.count);
+                    if (p.remainingWeight() < toTake * bestLayerCandidate.weight) {
                         toTake = Math.floor(p.remainingWeight() / itemToTake.weight);
                     }
-                    if (currentTotalGross + (toTake * bestLayer.weight) > maxGrossLimit) {
-                        toTake = Math.floor((maxGrossLimit - currentTotalGross) / bestLayer.weight);
+                    if (currentTotalGross + (toTake * bestLayerCandidate.weight) > maxGrossLimit) {
+                        toTake = Math.floor((maxGrossLimit - currentTotalGross) / bestLayerCandidate.weight);
                     }
 
                     if (toTake <= 0) break;
 
                     p.layers.push({
-                        box_name: bestLayer.name,
+                        box_name: bestLayerCandidate.name,
                         count: toTake,
-                        height: bestLayer.height,
+                        height: bestLayerCandidate.height,
                         z_start: p.currentHeight,
-                        z_end: p.currentHeight + bestLayer.height,
-                        meta: bestLayer.meta,
-                        orient_type: bestLayer.orientType,
-                        dim_cross: bestLayer.dim_cross,
-                        dim_long: bestLayer.dim_long
+                        z_end: p.currentHeight + bestLayerCandidate.height,
+                        meta: bestLayerCandidate.meta,
+                        orient_type: bestLayerCandidate.orientType,
+                        dim_cross: bestLayerCandidate.dim_cross,
+                        dim_long: bestLayerCandidate.dim_long
                     });
-                    p.currentWeight += toTake * bestLayer.weight;
-                    currentTotalGross += toTake * bestLayer.weight;
-                    p.currentHeight += bestLayer.height;
+                    p.currentWeight += toTake * bestLayerCandidate.weight;
+                    currentTotalGross += toTake * bestLayerCandidate.weight;
+                    p.currentHeight += bestLayerCandidate.height;
                     itemToTake.count -= toTake;
 
                     if (itemToTake.noStack) p.currentHeight = p.config.max_height;

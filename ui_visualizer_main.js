@@ -82,7 +82,7 @@ class MainDeckViz {
 
                 // New logic utilizing packer.js dim_cross (Z) and dim_long (X)
                 // If dimensions are missing (old packer version), fallback to block
-                if (!layer.dim_cross || !layer.dim_long) {
+                if (!layer.dim_cross || !layer.dim_long || !layer.meta || !layer.meta.main) {
                     const lGeom = new THREE.BoxGeometry(p.config.width_long * 0.95, layer.height, p.config.length_cross * 0.9);
                     const lMat = new THREE.MeshLambertMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.8 });
                     const lMesh = new THREE.Mesh(lGeom, lMat);
@@ -95,9 +95,8 @@ class MainDeckViz {
 
                 const dimZ = layer.dim_cross;
                 const dimX = layer.dim_long;
-                // packer.js: meta.main.r = rows along the long axis (X), meta.main.c = cols along the cross axis (Z)
-                const rowsX = layer.meta.main.r; // Items along pallet length (X)
-                const colsZ = layer.meta.main.c; // Items along pallet width (Z)
+                const rowsX = layer.meta.main.r || 0; 
+                const colsZ = layer.meta.main.c || 0; 
 
                 const paletteWidthZ = p.config.length_cross;
                 const paletteLengthX = p.config.width_long;
@@ -126,30 +125,21 @@ class MainDeckViz {
 
                 // Draw Side Block (if exists)
                 if (layer.meta.side) {
-                    // Logic from packer.js:
-                    // remCross = availCross - (cols * dimCross)
-                    // sCols = floor(remCross / dimLong)  -> Items along Z (but using 'long' dim) ??
-                    // sRows = floor(availLong / dimCross) -> Items along X (but using 'cross' dim) ??
+                    const isHorizontal = layer.meta.side.type === 'HORIZONTAL';
+                    
+                    const sDimZ = dimX; // rotate: side dimensions are swapped
+                    const sDimX = dimZ; 
+                    const sRowsX = layer.meta.side.r; 
+                    const sColsZ = layer.meta.side.c; 
 
-                    // Actually, let's look at tryOrientation again:
-                    // if (remCross >= dimLong && availLong >= dimCross) ...
-                    // Side block is rotated 90 degrees?
-                    // Usually side block fills the remaining width (Z).
-                    // So items in side block are rotated relative to main block?
-                    // Main: dimCross (Z), dimLong (X)
-                    // Side: uses dimLong for fit in Z, dimCross for fit in X ??
-                    // Packer: sCols = floor(remCross / dimLong) -> fit dimLongs into remaining Z.
-                    // So Side Item Z-dim = dimLong. Side Item X-dim = dimCross.
-                    // Yes, rotated.
-
-                    const sDimZ = dimX; // side block uses dimLong as its Z-dim (rotated)
-                    const sDimX = dimZ; // side block uses dimCross as its X-dim (rotated)
-                    // packer.js: meta.side.r = rows along X (sRows), meta.side.c = cols along Z (sCols)
-                    const sRowsX = layer.meta.side.r; // Items along X in side block
-                    const sColsZ = layer.meta.side.c; // Items along Z in side block
-
-                    const sideStartZ = startZ + (colsZ * dimZ);
-                    // Side block starts after the main block in Z axis
+                    let sStartX, sStartZ;
+                    if (isHorizontal) {
+                        sStartX = startX + (rowsX * dimX);
+                        sStartZ = startZ;
+                    } else {
+                        sStartX = startX;
+                        sStartZ = startZ + (colsZ * dimZ);
+                    }
 
                     const sBoxGeom = new THREE.BoxGeometry(sDimX - 1, layer.height - 1, sDimZ - 1);
                     const sBoxEdges = new THREE.EdgesGeometry(sBoxGeom);
@@ -159,8 +149,8 @@ class MainDeckViz {
                             const mesh = new THREE.Mesh(sBoxGeom, boxMat.clone());
                             mesh.add(new THREE.LineSegments(sBoxEdges, edgeMat));
 
-                            const posX = startX + (r * sDimX) + (sDimX / 2);
-                            const posZ = sideStartZ + (c * sDimZ) + (sDimZ / 2);
+                            const posX = sStartX + (r * sDimX) + (sDimX / 2);
+                            const posZ = sStartZ + (c * sDimZ) + (sDimZ / 2);
 
                             mesh.position.set(posX, layerY + 2.5, posZ);
                             group.add(mesh);

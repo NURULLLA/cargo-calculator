@@ -543,21 +543,42 @@ class CargoApp {
         this.results.pallets.forEach(p => {
             if (p.currentWeight === 0) return;
             const palletBoxes = p.layers.reduce((acc, l) => acc + l.count, 0);
+            const weightPrc = (p.currentWeight / p.maxNetWeight * 100).toFixed(0);
+            
             const item = document.createElement('div');
             item.className = 'report-item';
+            item.style.flexDirection = 'column';
+            item.style.gap = '0.75rem';
+            
             item.innerHTML = `
-                <span><strong>Pos ${p.id} (${p.config.code})</strong> - ${palletBoxes} boxes</span>
-                <span>${p.currentWeight.toLocaleString()} / ${p.maxNetWeight.toLocaleString()} kg</span>
-            `;
-            container.appendChild(item);
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <strong style="color:var(--accent); font-size:1.1rem;">Pos ${p.id}</strong>
+                        <span style="color:var(--text-muted); margin-left:8px;">${p.config.code}</span>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-weight:700;">${p.currentWeight.toLocaleString()} / ${p.maxNetWeight.toLocaleString()} kg</div>
+                        <div style="font-size:0.75rem; color:var(--text-muted);">${weightPrc}% Weight Capacity</div>
+                    </div>
+                </div>
+                
+                <div style="width:100%; height:6px; background:rgba(255,255,255,0.05); border-radius:3px; overflow:hidden;">
+                    <div style="width:${weightPrc}%; height:100%; background:var(--accent); border-radius:3px;"></div>
+                </div>
 
-            // Add Details Button
-            const btn = document.createElement('button');
-            btn.className = 'btn-sm btn-secondary';
-            btn.innerHTML = '<i class="fas fa-list"></i> View Manifest';
-            btn.style.marginTop = '0.5rem';
-            btn.onclick = () => this.showPalletManifest(p);
-            item.appendChild(btn);
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div style="font-size:0.9rem;">
+                        <i class="fas fa-boxes" style="margin-right:5px; color:var(--text-muted);"></i>
+                        <strong>${palletBoxes}</strong> boxes loaded
+                    </div>
+                    <button class="btn-sm btn-secondary" style="padding:4px 12px; font-size:0.75rem;">
+                        <i class="fas fa-list"></i> View Manifest
+                    </button>
+                </div>
+            `;
+            
+            item.querySelector('button').onclick = () => this.showPalletManifest(p);
+            container.appendChild(item);
         });
 
         // Lower Deck
@@ -609,47 +630,127 @@ class CargoApp {
     }
 
     showPalletManifest(pallet) {
-        let text = `<h3>Pallet ${pallet.id} (${pallet.config.code}) Manifest</h3>`;
-        text += `<p>Total Weight: ${pallet.currentWeight} kg</p>`;
-        text += `<div class="manifest-list">`;
+        const totalBoxes = pallet.layers.reduce((acc, l) => acc + l.count, 0);
+        let html = `
+            <div class="manifest-header">
+                <h3><i class="fas fa-pallet"></i> Manifest: Pallet ${pallet.id}</h3>
+                <div style="color:var(--text-muted); font-size:0.9rem;">Equipment: ${pallet.config.code} (${pallet.config.width_long}x${pallet.config.length_cross}x${pallet.config.max_height} cm)</div>
+            </div>
+
+            <div class="manifest-summary-bar">
+                <div class="m-stat">
+                    <span class="m-stat-label">Net Weight</span>
+                    <span class="m-stat-value">${pallet.currentWeight.toLocaleString()} kg</span>
+                </div>
+                <div class="m-stat">
+                    <span class="m-stat-label">Total Items</span>
+                    <span class="m-stat-value">${totalBoxes} units</span>
+                </div>
+                <div class="m-stat">
+                    <span class="m-stat-label">Layers</span>
+                    <span class="m-stat-value">${pallet.layers.length}</span>
+                </div>
+            </div>
+
+            <table class="manifest-table">
+                <thead>
+                    <tr>
+                        <th style="width:80px;">Layer</th>
+                        <th style="width:100px;">Height</th>
+                        <th>Box Description</th>
+                        <th style="text-align:right;">Quantity</th>
+                    </tr>
+                </thead>
+                <tbody>`;
 
         let cumulativeHeight = 0;
         pallet.layers.forEach((l, idx) => {
             cumulativeHeight += l.height;
-            text += `<div class="manifest-layer">
-                <strong>Layer ${idx + 1}</strong> (Height: ${l.height}cm | Total: ${cumulativeHeight}cm)<br>
-                ${l.count} x ${l.box_name} <br>`;
-
-            // Add metadata details if available
-            // meta.main.r = rows along long axis, meta.main.c = cols along cross axis
-            if (l.meta && l.meta.main) {
-                text += `<small>Main Block: ${l.meta.main.r} rows × ${l.meta.main.c} cols</small>`;
-            }
-            if (l.meta && l.meta.side) {
-                text += `<br><small>Side Block: ${l.meta.side.r} rows × ${l.meta.side.c} cols (Rotated)</small>`;
-            }
-            text += `</div>`;
+            html += `
+                <tr>
+                    <td><span class="manifest-layer-num">#${idx + 1}</span></td>
+                    <td>
+                        <div>${l.height} cm</div>
+                        <div style="font-size:0.7em; color:var(--text-muted);">Sum: ${cumulativeHeight} cm</div>
+                    </td>
+                    <td>
+                        <div style="font-weight:600;">${l.box_name}</div>
+                        <div class="manifest-meta">
+                            ${l.meta && l.meta.main ? `<i class="fas fa-th"></i> ${l.meta.main.r}r × ${l.meta.main.c}c` : ''}
+                            ${l.meta && l.meta.side ? ` <span style="margin-left:8px;"><i class="fas fa-rotate"></i> Side: ${l.meta.side.r}r × ${l.meta.side.c}c</span>` : ''}
+                        </div>
+                    </td>
+                    <td style="text-align:right; font-weight:700; color:var(--accent); font-size:1.1rem;">
+                        ${l.count}
+                    </td>
+                </tr>`;
         });
-        text += `</div>`;
 
-        this.showModal(text);
+        html += `
+                </tbody>
+            </table>
+            <div class="manifest-footer">
+                <i class="fas fa-check-circle"></i> End of Manifest for Pallet ${pallet.id}
+            </div>
+        `;
+
+        this.showModal(html);
     }
 
     showLowerDeckManifest(comp) {
-        let text = `<h3>Compartment ${comp.id} (${comp.name}) Manifest</h3>`;
-        text += `<p>Total Weight: ${comp.weight.toLocaleString()} kg</p>`;
-        text += `<div class="manifest-list">`;
+        const totalBoxes = comp.items.reduce((acc, i) => acc + i.count, 0);
+        let html = `
+            <div class="manifest-header">
+                <h3><i class="fas fa-box-open"></i> Manifest: ${comp.name}</h3>
+                <div style="color:var(--text-muted); font-size:0.9rem;">Compartment ID: ${comp.id}</div>
+            </div>
+
+            <div class="manifest-summary-bar">
+                <div class="m-stat">
+                    <span class="m-stat-label">Gross Weight</span>
+                    <span class="m-stat-value">${comp.weight.toLocaleString()} kg</span>
+                </div>
+                <div class="m-stat">
+                    <span class="m-stat-label">Total Units</span>
+                    <span class="m-stat-value">${totalBoxes} units</span>
+                </div>
+            </div>
+
+            <table class="manifest-table">
+                <thead>
+                    <tr>
+                        <th style="width:60px;">#</th>
+                        <th>Batch / Item Name</th>
+                        <th style="width:140px;">Dimensions</th>
+                        <th style="text-align:right;">Quantity</th>
+                    </tr>
+                </thead>
+                <tbody>`;
 
         comp.items.forEach((item, idx) => {
-            text += `<div class="manifest-layer">
-                <strong>Batch ${idx + 1}: ${item.name}</strong><br>
-                Qty: ${item.count} | Dims: ${item.l}x${item.w}x${item.h} cm<br>
-                Weight: ${item.weight ? item.weight.toLocaleString() + ' kg' : 'N/A'}
-            </div>`;
+            html += `
+                <tr>
+                    <td><span class="manifest-layer-num">${idx + 1}</span></td>
+                    <td>
+                        <div style="font-weight:600;">${item.name}</div>
+                        <div class="manifest-meta">Bulk Load</div>
+                    </td>
+                    <td>${item.l}x${item.w}x${item.h} cm</td>
+                    <td style="text-align:right; font-weight:700; color:var(--accent); font-size:1.1rem;">
+                        ${item.count}
+                    </td>
+                </tr>`;
         });
-        text += `</div>`;
 
-        this.showModal(text);
+        html += `
+                </tbody>
+            </table>
+            <div class="manifest-footer">
+                <i class="fas fa-check-circle"></i> End of Manifest for ${comp.id}
+            </div>
+        `;
+
+        this.showModal(html);
     }
 
     showModal(content) {
