@@ -130,9 +130,11 @@ const FUSELAGE_PROFILES = {
     ]
 };
 
+// Pre-sort profiles once at module load so getFuselageWidthFromProfile doesn't sort on every call
+Object.keys(FUSELAGE_PROFILES).forEach(k => FUSELAGE_PROFILES[k].sort((a, b) => a[0] - b[0]));
+
 function getFuselageWidthFromProfile(heightCm, zone) {
-    const profile = FUSELAGE_PROFILES[zone] || FUSELAGE_PROFILES.MIDDLE;
-    const sorted = [...profile].sort((a, b) => a[0] - b[0]);
+    const sorted = FUSELAGE_PROFILES[zone] || FUSELAGE_PROFILES.MIDDLE;
     if (heightCm <= sorted[0][0]) return sorted[0][1];
     if (heightCm >= sorted[sorted.length - 1][0]) return sorted[sorted.length - 1][1];
     for (let i = 0; i < sorted.length - 1; i++) {
@@ -356,21 +358,20 @@ const Packer = {
 
                     let bestLayerCandidate = null;
                     let itemToTake = null;
-                    
+                    let bestOverallPotential = -1;
+
                     for (let item of targetItems) {
                         if (item.count <= 0) continue;
                         if (!Packer.fitsThroughDoor(item, CONFIG.DOOR_MAIN)) continue;
                         if (p.remainingWeight() < item.weight) continue;
                         if (currentTotalGross + item.weight > maxGrossLimit) continue;
-                        
+
                         let bestVariantResult = null;
                         let maxTotalPotential = -1;
 
                         for (let variant of item.getVariants()) {
                             let res = Packer.calculateLayer(p, variant);
                             if (res) {
-                                // Optimization: Pick the variant that maximizes TOTAL pallet count for this item,
-                                // not just the count in a single layer.
                                 let layersPossible = 1;
                                 if (!item.noStack) {
                                     let remHeight = config.max_height - (p.currentHeight + variant.h);
@@ -384,11 +385,11 @@ const Packer = {
                                 }
                             }
                         }
-                        
-                        if (bestVariantResult) {
+
+                        if (bestVariantResult && maxTotalPotential > bestOverallPotential) {
+                            bestOverallPotential = maxTotalPotential;
                             bestLayerCandidate = bestVariantResult;
                             itemToTake = item;
-                            break; 
                         }
                     }
                     if (!bestLayerCandidate) break;
@@ -432,7 +433,7 @@ const Packer = {
                 if (!holdRes) {
                     holdRes = { name: hold.name, current_weight: 0, compartments: [] };
                     hold.compartments.forEach(comp => {
-                        holdRes.compartments.push({ id: comp.id, name: comp.name, items: [], weight: 0, volume: 0, max_weight: comp.max_weight, max_volume: comp.max_volume, geo_used_ratio: 0 });
+                        holdRes.compartments.push({ id: comp.id, name: comp.name, items: [], weight: 0, volume: 0, max_weight: comp.max_weight, max_volume: comp.max_volume });
                     });
                     lowerDeckResults.push(holdRes);
                 }
@@ -465,7 +466,8 @@ const Packer = {
                             ];
                             
                             for (let ori of orientations) {
-                                let rows = Math.floor(hold.floor_width_cm / ori.w);
+                                const effectiveFloorWidth = hold.min_floor_width_cm || hold.floor_width_cm;
+                                let rows = Math.floor(effectiveFloorWidth / ori.w);
                                 if (rows < 1) continue; // MUST FIT strictly inside floor width
                                 
                                 let maxLayers = Math.floor(compSpec.max_height_cm / itemHeight);
@@ -482,16 +484,13 @@ const Packer = {
                         
                         if (!bestCompFit) continue;
 
-                        let maxGeo = bestCompFit.maxGeo;
-                        let item_geo_ratio = 1.0 / maxGeo;
-                        // BUG FIX: Clamp geo_used_ratio to [0, 1] before computing remaining space
-                        let safeGeoUsed = Math.min(compData.geo_used_ratio, 1.0);
-                        let remainingGeo = Math.max(0, Math.floor(maxGeo * (1.0 - safeGeoUsed)));
+                        // Volume-based capacity check: how many items fit in remaining volume
+                        const remainingVolumeM3 = compSpec.max_volume - compData.volume;
+                        let remainingByVolume = item.volumeM3 > 0 ? Math.floor(remainingVolumeM3 / item.volumeM3) : bestCompFit.maxGeo;
 
-                        let toTake = Math.min(item.count, remainingGeo);
+                        let toTake = Math.min(item.count, bestCompFit.maxGeo, remainingByVolume);
                         let wTake = Math.floor((compSpec.max_weight - compData.weight) / item.weight);
                         toTake = Math.min(toTake, wTake);
-                        // BUG FIX: Also cap by hold-level remaining weight capacity
                         let holdTake = Math.floor((hold.max_weight - holdRes.current_weight) / item.weight);
                         toTake = Math.min(toTake, holdTake);
                         let aircraftTake = Math.floor((maxGrossLimit - currentTotalGross) / item.weight);
@@ -501,12 +500,11 @@ const Packer = {
                             let existing = compData.items.find(i => i.name === item.name);
                             if (existing) existing.count += toTake;
                             else compData.items.push({ name: item.name, count: toTake, l: bestCompFit.l, h: bestCompFit.h, w: bestCompFit.w, weight: item.weight });
-                            
+
                             compData.weight += toTake * item.weight;
                             holdRes.current_weight += toTake * item.weight;
                             currentTotalGross += toTake * item.weight;
                             compData.volume += toTake * item.volumeM3;
-                            compData.geo_used_ratio += toTake * item_geo_ratio;
                             item.count -= toTake;
                         }
                     }
