@@ -629,128 +629,252 @@ class CargoApp {
         if (this.results) this.ldViz.update(this.results);
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    //  MANIFEST — MAIN DECK PALLET (визуальная схема)
+    // ═══════════════════════════════════════════════════════════════
     showPalletManifest(pallet) {
-        const totalBoxes = pallet.layers.reduce((acc, l) => acc + l.count, 0);
-        let html = `
-            <div class="manifest-header">
-                <h3><i class="fas fa-pallet"></i> Manifest: Pallet ${pallet.id}</h3>
-                <div style="color:var(--text-muted); font-size:0.9rem;">Equipment: ${pallet.config.code} (${pallet.config.width_long}x${pallet.config.length_cross}x${pallet.config.max_height} cm)</div>
-            </div>
+        const totalBoxes = pallet.layers.reduce((a, l) => a + l.count, 0);
+        const pct = Math.round((pallet.currentWeight / pallet.maxNetWeight) * 100);
 
-            <div class="manifest-summary-bar">
-                <div class="m-stat">
-                    <span class="m-stat-label">Net Weight</span>
-                    <span class="m-stat-value">${pallet.currentWeight.toLocaleString()} kg</span>
-                </div>
-                <div class="m-stat">
-                    <span class="m-stat-label">Total Items</span>
-                    <span class="m-stat-value">${totalBoxes} units</span>
-                </div>
-                <div class="m-stat">
-                    <span class="m-stat-label">Layers</span>
-                    <span class="m-stat-value">${pallet.layers.length}</span>
-                </div>
-            </div>
-
-            <table class="manifest-table">
-                <thead>
-                    <tr>
-                        <th style="width:80px;">Layer</th>
-                        <th style="width:100px;">Height</th>
-                        <th>Box Description</th>
-                        <th style="text-align:right;">Quantity</th>
-                    </tr>
-                </thead>
-                <tbody>`;
-
-        let cumulativeHeight = 0;
-        pallet.layers.forEach((l, idx) => {
-            cumulativeHeight += l.height;
-            html += `
-                <tr>
-                    <td><span class="manifest-layer-num">#${idx + 1}</span></td>
-                    <td>
-                        <div>${l.height} cm</div>
-                        <div style="font-size:0.7em; color:var(--text-muted);">Sum: ${cumulativeHeight} cm</div>
-                    </td>
-                    <td>
-                        <div style="font-weight:600;">${l.box_name}</div>
-                        <div class="manifest-meta">
-                            ${l.meta && l.meta.main ? `<i class="fas fa-th"></i> ${l.meta.main.r}r × ${l.meta.main.c}c` : ''}
-                            ${l.meta && l.meta.side ? ` <span style="margin-left:8px;"><i class="fas fa-rotate"></i> Side: ${l.meta.side.r}r × ${l.meta.side.c}c</span>` : ''}
+        const modal = document.createElement('div');
+        modal.className = 'mf-overlay';
+        modal.innerHTML = `
+            <div class="mf-modal">
+                <div class="mf-header">
+                    <div>
+                        <h2 class="mf-title">&#9992; СХЕМА ПОГРУЗКИ &mdash; Позиция ${pallet.id} (${pallet.config.code})</h2>
+                        <div class="mf-header-badges">
+                            <span class="mf-badge mf-badge-blue">&#9878; ${pallet.currentWeight.toLocaleString()} / ${pallet.maxNetWeight.toLocaleString()} кг (${pct}%)</span>
+                            <span class="mf-badge mf-badge-green">&#128230; ${totalBoxes} коробок</span>
+                            <span class="mf-badge mf-badge-gray">&#128207; Высота стопки: ${pallet.currentHeight} см</span>
+                            <span class="mf-badge mf-badge-gray">Поддон: ${pallet.config.length_cross}&times;${pallet.config.width_long}&times;${pallet.config.max_height} см</span>
                         </div>
-                    </td>
-                    <td style="text-align:right; font-weight:700; color:var(--accent); font-size:1.1rem;">
-                        ${l.count}
-                    </td>
-                </tr>`;
-        });
-
-        html += `
-                </tbody>
-            </table>
-            <div class="manifest-footer">
-                <i class="fas fa-check-circle"></i> End of Manifest for Pallet ${pallet.id}
+                    </div>
+                    <button class="mf-close" onclick="this.closest('.mf-overlay').remove()">&times;</button>
+                </div>
+                <div class="mf-orient-banner">
+                    <div class="mf-orient-inner">
+                        <span class="mf-nose">&#9668; НОС САМОЛЁТА</span>
+                        <div class="mf-fuselage-line"><span class="mf-fuselage-label">ФЮЗЕЛЯЖ</span></div>
+                        <span class="mf-tail">ХВОСТ &#9658;</span>
+                    </div>
+                    <p class="mf-orient-hint">Поддон загружается через боковую дверь. Длинная сторона поддона идёт <strong>поперёк фюзеляжа</strong> (от борта к борту). ${pallet.config.length_cross} см &mdash; поперёк, ${pallet.config.width_long} см &mdash; вдоль.</p>
+                </div>
+                <div class="mf-section">
+                    <h3 class="mf-section-title">&#128208; Вид сбоку &mdash; все слои</h3>
+                    ${this._renderElevationSVG(pallet)}
+                </div>
+                <div class="mf-section">
+                    <h3 class="mf-section-title">&#128230; Детальная схема по слоям</h3>
+                    <div class="mf-layers">
+                        ${pallet.layers.map((layer, idx) => this._renderLayerCard(layer, idx, pallet.config)).join('')}
+                    </div>
+                </div>
+                <div class="mf-footer-note">
+                    &#9888; Перед погрузкой убедитесь, что каждая коробка установлена строго по схеме.
+                    &darr;&uarr; = вдоль фюзеляжа &nbsp;&bull;&nbsp; &larr;&rarr; = поперёк фюзеляжа.
+                </div>
             </div>
         `;
-
-        this.showModal(html);
+        document.body.appendChild(modal);
+        modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    //  MANIFEST — LOWER DECK COMPARTMENT (визуальная схема)
+    // ═══════════════════════════════════════════════════════════════
     showLowerDeckManifest(comp) {
-        const totalBoxes = comp.items.reduce((acc, i) => acc + i.count, 0);
-        let html = `
-            <div class="manifest-header">
-                <h3><i class="fas fa-box-open"></i> Manifest: ${comp.name}</h3>
-                <div style="color:var(--text-muted); font-size:0.9rem;">Compartment ID: ${comp.id}</div>
-            </div>
+        const totalBoxes = comp.items.reduce((a, i) => a + i.count, 0);
+        const pct = Math.round((comp.weight / comp.max_weight) * 100);
+        const hold = CONFIG.LOWER_DECK.find(h => h.compartments.some(c => c.id === comp.id)) || { door: { width: 140, height: 112 }, floor_width_cm: 120 };
 
-            <div class="manifest-summary-bar">
-                <div class="m-stat">
-                    <span class="m-stat-label">Gross Weight</span>
-                    <span class="m-stat-value">${comp.weight.toLocaleString()} kg</span>
+        const modal = document.createElement('div');
+        modal.className = 'mf-overlay';
+        modal.innerHTML = `
+            <div class="mf-modal">
+                <div class="mf-header">
+                    <div>
+                        <h2 class="mf-title">&#128309; СХЕМА ПОГРУЗКИ &mdash; ${comp.name}</h2>
+                        <div class="mf-header-badges">
+                            <span class="mf-badge mf-badge-blue">&#9878; ${comp.weight.toLocaleString()} / ${comp.max_weight.toLocaleString()} кг (${pct}%)</span>
+                            <span class="mf-badge mf-badge-green">&#128230; ${totalBoxes} коробок</span>
+                            <span class="mf-badge mf-badge-gray">&#128208; ${comp.max_length_cm}&times;${hold.floor_width_cm}&times;${comp.max_height_cm} см</span>
+                        </div>
+                    </div>
+                    <button class="mf-close" onclick="this.closest('.mf-overlay').remove()">&times;</button>
                 </div>
-                <div class="m-stat">
-                    <span class="m-stat-label">Total Units</span>
-                    <span class="m-stat-value">${totalBoxes} units</span>
+                <div class="mf-orient-banner">
+                    <div class="mf-orient-inner">
+                        <span class="mf-nose">&#9668; ПЕРЕДНЯЯ СТЕНКА</span>
+                        <div class="mf-fuselage-line"><span class="mf-fuselage-label">ОТСЕК</span></div>
+                        <span class="mf-tail">ЗАДНЯЯ СТЕНКА &#9658;</span>
+                    </div>
+                    <p class="mf-orient-hint">Люк: <strong>${hold.door.width}&times;${hold.door.height} см</strong>. Коробки загружаются снизу через люк и задвигаются вдоль фюзеляжа.</p>
                 </div>
-            </div>
-
-            <table class="manifest-table">
-                <thead>
-                    <tr>
-                        <th style="width:60px;">#</th>
-                        <th>Batch / Item Name</th>
-                        <th style="width:140px;">Dimensions</th>
-                        <th style="text-align:right;">Quantity</th>
-                    </tr>
-                </thead>
-                <tbody>`;
-
-        comp.items.forEach((item, idx) => {
-            html += `
-                <tr>
-                    <td><span class="manifest-layer-num">${idx + 1}</span></td>
-                    <td>
-                        <div style="font-weight:600;">${item.name}</div>
-                        <div class="manifest-meta">Bulk Load</div>
-                    </td>
-                    <td>${item.l}x${item.w}x${item.h} cm</td>
-                    <td style="text-align:right; font-weight:700; color:var(--accent); font-size:1.1rem;">
-                        ${item.count}
-                    </td>
-                </tr>`;
-        });
-
-        html += `
-                </tbody>
-            </table>
-            <div class="manifest-footer">
-                <i class="fas fa-check-circle"></i> End of Manifest for ${comp.id}
+                <div class="mf-section">
+                    <h3 class="mf-section-title">&#128208; Схема укладки (вид сверху)</h3>
+                    ${this._renderLowerDeckTopView(comp, hold)}
+                </div>
+                <div class="mf-section">
+                    <h3 class="mf-section-title">&#128203; Содержимое отсека</h3>
+                    <div class="mf-comp-items">
+                        ${comp.items.map(item => this._renderCompItemCard(item, comp, hold)).join('')}
+                    </div>
+                </div>
             </div>
         `;
+        document.body.appendChild(modal);
+        modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+    }
 
-        this.showModal(html);
+    // ─── SVG: вид сбоку (elevation) ──────────────────────────────
+    _renderElevationSVG(pallet) {
+        const W = 520, H = 200, PL = 38, PR = 12, PT = 12, PB = 28;
+        const dW = W-PL-PR, dH = H-PT-PB;
+        const sX = dW / pallet.config.width_long, sY = dH / pallet.config.max_height;
+        const C = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899'];
+        let rects = '';
+        pallet.layers.forEach((layer, i) => {
+            const col = C[i % C.length], ry = PT + dH - layer.z_end * sY, rh = layer.height * sY;
+            rects += `<rect x="${PL}" y="${ry.toFixed(1)}" width="${dW}" height="${rh.toFixed(1)}" fill="${col}" opacity="0.82" rx="2"/>`;
+            if (rh > 13) rects += `<text x="${(PL+dW/2).toFixed(1)}" y="${(ry+rh/2+4).toFixed(1)}" text-anchor="middle" font-size="10" fill="white" font-weight="bold">Слой ${i+1}: ${layer.count} шт. &bull; ${layer.height}см</text>`;
+        });
+        let grid = '';
+        for (let v = 0; v <= pallet.config.max_height; v += 50) {
+            const gy = PT + dH - v * sY;
+            grid += `<line x1="${PL}" y1="${gy.toFixed(1)}" x2="${W-PR}" y2="${gy.toFixed(1)}" stroke="#1e3a5f" stroke-width="1"/>`;
+            grid += `<text x="${PL-4}" y="${(gy+3).toFixed(1)}" text-anchor="end" font-size="9" fill="#64748b">${v}</text>`;
+        }
+        grid += `<line x1="${PL}" y1="${PT}" x2="${W-PR}" y2="${PT}" stroke="#ef4444" stroke-width="1" stroke-dasharray="5,3" opacity="0.7"/>`;
+        grid += `<text x="${W-PR}" y="${PT-2}" text-anchor="end" font-size="8" fill="#ef4444">макс ${pallet.config.max_height}см</text>`;
+        grid += `<rect x="${PL}" y="${PT+dH}" width="${dW}" height="4" fill="#475569" rx="1"/>`;
+        grid += `<text x="${PL+dW/2}" y="${H-6}" text-anchor="middle" font-size="9" fill="#64748b">Вдоль фюзеляжа: ${pallet.config.width_long}см</text>`;
+        grid += `<text x="${PL-18}" y="${PT+dH/2}" text-anchor="middle" font-size="9" fill="#64748b" transform="rotate(-90,${PL-18},${PT+dH/2})">Высота (см)</text>`;
+        return `<div class="mf-svg-wrap"><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="max-width:100%">${grid}${rects}</svg></div>`;
+    }
+
+    // ─── SVG: вид сверху одного слоя ─────────────────────────────
+    _renderTopViewSVG(layer, config, color) {
+        const SW = 340, SH = 210, PAD = 2, LH = 22, dH = SH - LH;
+        const sX = (SW-PAD*2) / config.length_cross, sY = (dH-PAD*2) / config.width_long;
+        const dC = layer.dim_cross || 100, dL = layer.dim_long || 80;
+        const mC = layer.meta?.main?.r || 0, mR = layer.meta?.main?.c || 0, side = layer.meta?.side;
+        let boxes = '';
+        for (let r = 0; r < mR; r++) for (let c = 0; c < mC; c++) {
+            const bx = PAD+c*dC*sX, by = PAD+r*dL*sY, bw = Math.max(2,dC*sX-1.5), bh = Math.max(2,dL*sY-1.5);
+            boxes += `<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="${color}" opacity="0.82" rx="2" stroke="white" stroke-width="0.5"/>`;
+            if (bw>20&&bh>16) boxes += `<text x="${(bx+bw/2).toFixed(1)}" y="${(by+bh/2+4).toFixed(1)}" text-anchor="middle" font-size="10" fill="rgba(255,255,255,0.9)">&udarr;</text>`;
+        }
+        if (side?.count > 0) {
+            const ox = PAD+mC*dC*sX+3, sdC = dL, sdL = dC;
+            for (let r = 0; r < side.c; r++) for (let c = 0; c < side.r; c++) {
+                const bx = ox+c*sdC*sX, by = PAD+r*sdL*sY, bw = Math.max(2,sdC*sX-1.5), bh = Math.max(2,sdL*sY-1.5);
+                boxes += `<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="#f59e0b" opacity="0.85" rx="2" stroke="white" stroke-width="0.5"/>`;
+                if (bw>16&&bh>14) boxes += `<text x="${(bx+bw/2).toFixed(1)}" y="${(by+bh/2+4).toFixed(1)}" text-anchor="middle" font-size="10" fill="rgba(255,255,255,0.9)">&harr;</text>`;
+            }
+        }
+        const outline = `<rect x="1" y="1" width="${SW-2}" height="${dH-2}" fill="none" stroke="#475569" stroke-width="1.5" rx="3" stroke-dasharray="5,3"/>`;
+        const ax = `<text x="${SW/2}" y="${dH+14}" text-anchor="middle" font-size="8" fill="#64748b">&larr; ПОПЕРЁК ФЮЗЕЛЯЖА (${config.length_cross}см) &rarr;</text>`;
+        const lY = dH+2;
+        const leg = `<rect x="2" y="${lY}" width="9" height="9" fill="${color}" rx="1"/><text x="14" y="${lY+8}" font-size="7.5" fill="#94a3b8">Обычно (&uarr;&darr; вдоль)</text>`
+            + (side ? `<rect x="110" y="${lY}" width="9" height="9" fill="#f59e0b" rx="1"/><text x="122" y="${lY+8}" font-size="7.5" fill="#94a3b8">Повёрнуто 90&deg; (&harr;)</text>` : '');
+        return `<div class="mf-svg-wrap"><svg width="${SW}" height="${SH}" viewBox="0 0 ${SW} ${SH}" style="max-width:100%">${outline}${boxes}${ax}${leg}</svg></div>`;
+    }
+
+    // ─── Карточка одного слоя ─────────────────────────────────────
+    _renderLayerCard(layer, idx, config) {
+        const C = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899'];
+        const col = C[idx % C.length];
+        const dC = layer.dim_cross||'?', dL = layer.dim_long||'?';
+        const mC = layer.meta?.main?.r||0, mR = layer.meta?.main?.c||0, side = layer.meta?.side;
+        const instr = layer.orient_type === 'A'
+            ? `Класть коробку <strong style="color:#f59e0b">длинной стороной (${dC}см) ПОПЕРЁК самолёта</strong> &mdash; длина уходит влево-вправо.`
+            : `Класть коробку <strong style="color:#f59e0b">короткой стороной (${dC}см) ПОПЕРЁК самолёта</strong>, длинная сторона (${dL}см) идёт вдоль нос-хвост.`;
+        return `
+        <div class="mf-layer-card" style="border-left:4px solid ${col}">
+            <div class="mf-layer-header">
+                <div class="mf-layer-num" style="background:${col}20;color:${col};border:1px solid ${col}40">СЛОЙ ${idx+1}</div>
+                <div class="mf-layer-meta">
+                    <span class="mf-badge-sm" style="background:#1e3a5f;color:#7dd3fc">&#128230; ${layer.count} кор.</span>
+                    <span class="mf-badge-sm" style="background:#14362e;color:#6ee7b7">&#9878; ${(layer.count*(layer.weight||0)).toLocaleString()} кг</span>
+                    <span class="mf-badge-sm" style="background:#2d1f3d;color:#c4b5fd">${layer.z_start}&ndash;${layer.z_end}см</span>
+                    <span class="mf-badge-sm" style="background:#332b00;color:#fcd34d">Выс: ${layer.height}см</span>
+                </div>
+            </div>
+            <div class="mf-layer-body">
+                <div class="mf-topview-wrap">
+                    <div class="mf-topview-ylabel"><span>&uarr;</span><span style="writing-mode:vertical-rl;transform:rotate(180deg);font-size:9px;color:#64748b">ВДОЛЬ</span><span>&darr;</span></div>
+                    ${this._renderTopViewSVG(layer, config, col)}
+                </div>
+                <div class="mf-instructions">
+                    <div class="mf-instr-callout">
+                        <div class="mf-instr-callout-icon">${layer.orient_type==='A'?'&harr;':'&udarr;'}</div>
+                        <div>
+                            <div class="mf-instr-callout-title">КАК СТАВИТЬ КОРОБКУ</div>
+                            <p style="margin:0.3rem 0 0;line-height:1.5">${instr}</p>
+                        </div>
+                    </div>
+                    <table class="mf-spec-table">
+                        <tr><td>Название</td><td><strong>${layer.box_name||'—'}</strong></td></tr>
+                        <tr><td>Размер (попер&times;вдоль&times;выс)</td><td><strong>${dC}&times;${dL}&times;${layer.height}см</strong></td></tr>
+                        <tr><td>Колонны поперёк</td><td>${mC} шт. &times; ${dC}см = <strong>${(mC * +dC).toFixed(0)}см</strong></td></tr>
+                        <tr><td>Ряды вдоль</td><td>${mR} шт. &times; ${dL}см = <strong>${(mR * +dL).toFixed(0)}см</strong></td></tr>
+                        ${side?`<tr class="mf-side-row"><td>+ Повёрнутые 90&deg;</td><td>${side.count} шт. &mdash; <span style="color:#f59e0b">жёлтые на схеме</span></td></tr>`:''}
+                    </table>
+                    ${side?`<div class="mf-side-note">&#9888; Жёлтые коробки повёрнуты: ${dL}см поперёк, ${dC}см вдоль.</div>`:''}
+                </div>
+            </div>
+        </div>`;
+    }
+
+    // ─── SVG: нижняя палуба вид сверху ───────────────────────────
+    _renderLowerDeckTopView(comp, hold) {
+        const W=460, H=170, PAD=4, LAB=28, cL=comp.max_length_cm, cW=hold.floor_width_cm||120;
+        const sX=(W-LAB-PAD*2)/cL, sY=(H-PAD*2-20)/cW, oX=LAB+PAD, oY=PAD;
+        const cw=cL*sX, ch=cW*sY;
+        let c = `<rect x="${oX}" y="${oY}" width="${cw.toFixed(1)}" height="${ch.toFixed(1)}" fill="#0f172a" stroke="#334155" stroke-width="1.5" rx="3"/>`;
+        if (comp.obstacles) comp.obstacles.forEach(obs => {
+            const ox=oX+(cL-obs.l)*sX, ow=obs.l*sX, oh=Math.min(obs.w*sY,ch);
+            c += `<rect x="${ox.toFixed(1)}" y="${oY}" width="${ow.toFixed(1)}" height="${oh.toFixed(1)}" fill="#ef4444" opacity="0.3" rx="2" stroke="#ef4444" stroke-width="1"/>`;
+            if (ow>25) c += `<text x="${(ox+ow/2).toFixed(1)}" y="${(oY+oh/2+4).toFixed(1)}" text-anchor="middle" font-size="8" fill="#ef4444" font-weight="bold">ПРЕПЯТСТВИЕ</text>`;
+        });
+        const CS=['#3b82f6','#10b981','#f59e0b','#8b5cf6']; let curX=0;
+        comp.items.forEach((item,ci) => {
+            const col=CS[ci%CS.length], iL=item.l||100, iW=item.w||80, rows=Math.max(1,Math.floor(cW/iW));
+            let placed=0;
+            while (placed<item.count && curX+iL<=cL) {
+                for (let r=0; r<rows&&placed<item.count; r++) {
+                    const bx=oX+curX*sX, by=oY+r*iW*sY, bw=Math.max(1,iL*sX-1.5), bh=Math.max(1,iW*sY-1.5);
+                    c += `<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="${col}" opacity="0.8" rx="2"/>`;
+                    placed++;
+                }
+                curX+=iL;
+            }
+        });
+        c += `<rect x="${oX}" y="${oY}" width="5" height="${ch.toFixed(1)}" fill="#22c55e" opacity="0.7" rx="1"/>`;
+        c += `<text x="${(oX+3).toFixed(1)}" y="${oY-3}" text-anchor="middle" font-size="7" fill="#22c55e">&#9660;ЛЮК</text>`;
+        c += `<text x="${(oX+cw/2).toFixed(1)}" y="${H-3}" text-anchor="middle" font-size="8" fill="#64748b">Длина: ${cL}см</text>`;
+        c += `<text x="${(LAB/2).toFixed(1)}" y="${(oY+ch/2).toFixed(1)}" text-anchor="middle" font-size="8" fill="#64748b" transform="rotate(-90,${LAB/2},${oY+ch/2})">Шир: ${cW}см</text>`;
+        return `<div class="mf-svg-wrap"><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="max-width:100%">${c}</svg></div>`;
+    }
+
+    // ─── Карточка предмета нижней палубы ─────────────────────────
+    _renderCompItemCard(item, comp, hold) {
+        const CS=['#3b82f6','#10b981','#f59e0b','#8b5cf6'];
+        const col = CS[comp.items.indexOf(item) % CS.length];
+        const fits = (item.h<=hold.door.height) && (Math.min(item.l||0,item.w||0)<=hold.door.width);
+        return `
+        <div class="mf-comp-card" style="border-left:4px solid ${col}">
+            <div class="mf-comp-card-header">
+                <span style="color:${col};font-weight:700">&#128230; ${item.name}</span>
+                <span class="mf-badge-sm" style="background:#1e293b">${item.count} шт.</span>
+            </div>
+            <table class="mf-spec-table" style="margin-top:0.5rem">
+                <tr><td>Размер (Д&times;Ш&times;В)</td><td><strong>${item.l}&times;${item.w}&times;${item.h}см</strong></td></tr>
+                <tr><td>Через люк (${hold.door.width}&times;${hold.door.height}см)</td><td style="color:${fits?'#22c55e':'#ef4444'};font-weight:bold">${fits?'&#10003; Проходит':'&#10007; Не проходит'}</td></tr>
+                <tr><td>Как загружать</td><td>Плашмя (выс. ${item.h}см), задвигать вдоль фюзеляжа до упора</td></tr>
+            </table>
+        </div>`;
     }
 
     showModal(content) {
@@ -765,12 +889,11 @@ class CargoApp {
         document.body.appendChild(modal);
     }
 
-    // ─── PASTE FROM EXCEL ───────────────────────────────────────────────────
+
+    // ─── PASTE FROM EXCEL ────────────────────────────────────────
     _parsePasteText(text) {
         const lines = text.trim().split(/\r?\n/).filter(l => l.trim());
         if (lines.length < 2) return [];
-
-        // Parse TSV (tab-separated, as copied from Excel)
         const rows = lines.map(l => l.split('\t').map(c => c.trim()));
         const headers = Array.from(rows[0] || []).map(h => String(h || '').trim().toLowerCase());
 
@@ -783,153 +906,127 @@ class CargoApp {
         };
 
         const cols = {
-            name:    findCol(['description of goods', 'description', 'item name', 'name', 'batch', 'box', 'cargo']),
-            qty:     findCol(['total cartoon', 'total carton', 'qty', 'quantity', 'cartons', 'ctns', 'count', 'pcs', 'units']),
-            weight:  findCol(['gross weight', 'weight per carton', 'weight', 'gross wt', 'kg', 'wt', 'kgs']),
-            size:    findCol(['size of per carton', 'size per carton', 'size', 'dimensions', 'meas', 'l x w x h']),
-            length:  findCol(['l cm', 'd cm', 'length', 'l (cm)', 'l']),
-            width:   findCol(['w cm', 'width', 'w (cm)', 'w']),
-            height:  findCol(['h cm', 'height', 'h (cm)', 'h']),
+            name:   findCol(['description of goods', 'description', 'item name', 'name', 'batch', 'box', 'cargo']),
+            qty:    findCol(['total cartoon', 'total carton', 'qty', 'quantity', 'cartons', 'ctns', 'count', 'pcs', 'units']),
+            weight: findCol(['gross weight', 'weight per carton', 'weight', 'gross wt', 'kg', 'wt', 'kgs']),
+            size:   findCol(['size of per carton', 'size per carton', 'size', 'dimensions', 'meas', 'l x w x h']),
+            length: findCol(['l cm', 'd cm', 'length', 'l (cm)', 'l']),
+            width:  findCol(['w cm', 'width', 'w (cm)', 'w']),
+            height: findCol(['h cm', 'height', 'h (cm)', 'h']),
         };
 
-        const items = [];
+        const parseNum = (v) => { if (v === undefined || v === null) return NaN; return parseFloat(String(v).replace(/[^\d.\-]/g, '')); };
+
+        const parseDims = (sizeStr) => {
+            if (!sizeStr) return null;
+            const m = String(sizeStr).match(/([\d.]+)\s*[xX*×]\s*([\d.]+)\s*[xX*×]\s*([\d.]+)/);
+            if (m) return { l: parseFloat(m[1]), w: parseFloat(m[2]), h: parseFloat(m[3]) };
+            return null;
+        };
+
+        const results = [];
         for (let i = 1; i < rows.length; i++) {
             const row = rows[i];
-            if (!row || !row.some(c => c)) continue;
-
-            const name = cols.name !== -1 && row[cols.name] ? row[cols.name] : `Item ${i}`;
-            let l = cols.length !== -1 ? parseFloat(row[cols.length]) : NaN;
-            let w = cols.width  !== -1 ? parseFloat(row[cols.width])  : NaN;
-            let h = cols.height !== -1 ? parseFloat(row[cols.height]) : NaN;
-
-            // Parse from combined size column e.g. "65 x 45.5 x 30" or "50*50*55"
-            if ((isNaN(l) || isNaN(w) || isNaN(h)) && cols.size !== -1 && row[cols.size]) {
-                const nums = row[cols.size].match(/\d+(\.\d+)?/g);
-                if (nums && nums.length >= 3) {
-                    l = parseFloat(nums[0]);
-                    w = parseFloat(nums[1]);
-                    h = parseFloat(nums[2]);
-                }
+            if (!row || row.every(c => !c)) continue;
+            const name = cols.name >= 0 ? (row[cols.name] || '') : `Item ${i}`;
+            if (!name.trim()) continue;
+            const qty = cols.qty >= 0 ? parseNum(row[cols.qty]) : NaN;
+            const weight = cols.weight >= 0 ? parseNum(row[cols.weight]) : NaN;
+            let l = cols.length >= 0 ? parseNum(row[cols.length]) : NaN;
+            let w = cols.width  >= 0 ? parseNum(row[cols.width])  : NaN;
+            let h = cols.height >= 0 ? parseNum(row[cols.height]) : NaN;
+            if ((isNaN(l) || isNaN(w) || isNaN(h)) && cols.size >= 0) {
+                const dims = parseDims(row[cols.size]);
+                if (dims) { l = dims.l; w = dims.w; h = dims.h; }
             }
-
-            const wt  = cols.weight !== -1 ? parseFloat(row[cols.weight]) : NaN;
-            const qty = cols.qty    !== -1 ? (parseInt(row[cols.qty]) || 1) : 1;
-
-            if (isNaN(l) || isNaN(w) || isNaN(h) || isNaN(wt) || l <= 0 || w <= 0 || h <= 0 || wt <= 0) continue;
-
-            items.push({ name, length: l, width: w, height: h, weight: wt, count: qty });
+            if (!name || isNaN(qty) || qty <= 0) continue;
+            results.push({
+                name: name.trim(),
+                qty: Math.round(qty),
+                weight: isNaN(weight) ? 10 : weight,
+                l: isNaN(l) ? 60 : l,
+                w: isNaN(w) ? 40 : w,
+                h: isNaN(h) ? 40 : h,
+            });
         }
-        return items;
+        return results;
     }
 
     previewPastedExcel() {
         const text = document.getElementById('paste-area').value;
-        const items = this._parsePasteText(text);
         const preview = document.getElementById('paste-preview');
-        if (items.length === 0) {
-            preview.innerHTML = '<span style="color:#ef4444;">⚠️ Данные не распознаны. Убедитесь что первая строка — заголовки.</span>';
-            return;
-        }
-        let html = `<span style="color:#10b981;">✅ Найдено ${items.length} позиций:</span><br><div style="margin-top:6px; max-height:100px; overflow-y:auto;">`;
-        items.slice(0, 5).forEach(it => {
-            html += `<div style="padding:2px 0; border-bottom:1px solid var(--border);">📦 <strong>${it.name}</strong> — ${it.count} шт | ${it.length}×${it.width}×${it.height} см | ${it.weight} кг</div>`;
-        });
-        if (items.length > 5) html += `<div style="color:var(--text-muted); padding-top:4px;">... и ещё ${items.length - 5} позиций</div>`;
-        html += '</div>';
-        preview.innerHTML = html;
+        if (!text.trim()) { preview.innerHTML = ''; return; }
+        const items = this._parsePasteText(text);
+        if (!items.length) { preview.innerHTML = '<span style="color:var(--danger)">Не удалось распознать данные. Проверьте заголовки таблицы.</span>'; return; }
+        preview.innerHTML = `<span style="color:var(--success)">&#10003; Найдено ${items.length} позиций: </span>`
+            + items.slice(0, 3).map(i => `<strong>${i.name}</strong> &times;${i.qty}`).join(', ')
+            + (items.length > 3 ? ` и ещё ${items.length - 3}...` : '');
     }
 
     importPastedExcel() {
         const text = document.getElementById('paste-area').value;
         const items = this._parsePasteText(text);
-        if (items.length === 0) {
-            alert('Данные не распознаны. Убедитесь, что вы скопировали строку с заголовками и данные.');
-            return 0;
-        }
-        items.forEach(it => {
+        if (!items.length) { this.showToast('Не удалось разобрать данные из буфера.', 'error'); return; }
+        items.forEach(item => {
             this.cargo.push({
                 id: Date.now() + Math.random(),
-                name: it.name,
-                length: it.length,
-                width: it.width,
-                height: it.height,
-                weight: it.weight,
-                count: it.count,
-                allowTipping: true,
-                noStack: false,
-                priority: false,
-                mainDeckOnly: false,
-                lowerDeckOnly: false
+                name: item.name,
+                length: item.l, width: item.w, height: item.h,
+                weight: item.weight, count: item.qty,
+                allowTipping: false, noStack: false, priority: false,
+                mainDeckOnly: false, lowerDeckOnly: false
             });
         });
         this.renderInventory();
-        return items.length;
+        this.showToast(`Добавлено ${items.length} позиций из Excel`, 'success');
     }
-    // ────────────────────────────────────────────────────────────────────────
 
-    optimize() {
-        if (!this.results || this.results.pallets.filter(p => p.currentWeight > 0).length === 0) {
-            alert("Calculate load first");
-            return;
-        }
-
-        const btn = document.getElementById('btn-optimize');
-        const originalHtml = btn.innerHTML;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Shuffling...';
-        btn.disabled = true;
-
-        setTimeout(() => {
-            const configCode = document.getElementById('config-select').value;
-            const palletConfig = CONFIG.PALLET_OPTIONS[configCode];
-
-            // Get loaded pallets and pick random target positions for them
-            let activePallets = this.results.pallets.filter(p => p.currentWeight > 0);
-            let availablePositions = Array.from({ length: palletConfig.count }, (_, i) => i + 1);
-            this.shuffleArray(availablePositions);
-            let targetPositions = availablePositions.slice(0, activePallets.length).sort((a, b) => a - b);
-
-            // Reassign position IDs on the existing pallet objects (no re-packing!)
-            activePallets.forEach((p, idx) => {
-                p.id = targetPositions[idx];
-            });
-
-            // Rebuild full pallet array — active pallets in new slots, rest empty
-            const newPallets = [];
-            for (let i = 1; i <= palletConfig.count; i++) {
-                const active = activePallets.find(p => p.id === i);
-                if (active) {
-                    newPallets.push(active);
-                } else {
-                    // Use correct weight field: weight_limits per position or default_weight
-                    const wLimit = palletConfig.weight_limits[i] || palletConfig.default_weight;
-                    newPallets.push({
-                        id: i,
-                        config: palletConfig,
-                        layers: [],
-                        currentWeight: 0,
-                        currentHeight: 0,
-                        maxNetWeight: wLimit - palletConfig.tare_weight,
-                        zone: i === 1 ? 'NOSE' : (i === palletConfig.count ? 'TAIL' : 'MIDDLE')
-                    });
+    handleExcelImport(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        this.showImportStatus('Загрузка файла...', 'loading');
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            try {
+                const data = new Uint8Array(evt.target.result);
+                // SheetJS / xlsx expected to be loaded globally
+                if (typeof XLSX === 'undefined') {
+                    this.showImportStatus('Библиотека XLSX не загружена.', 'error'); return;
                 }
+                const workbook = XLSX.read(data, { type: 'array' });
+                const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+                const items = this._parsePasteText(rows.map(r => r.join('\t')).join('\n'));
+                if (!items.length) { this.showImportStatus('Не удалось найти данные в файле.', 'error'); return; }
+                items.forEach(item => {
+                    this.cargo.push({
+                        id: Date.now() + Math.random(),
+                        name: item.name,
+                        length: item.l, width: item.w, height: item.h,
+                        weight: item.weight, count: item.qty,
+                        allowTipping: false, noStack: false, priority: false,
+                        mainDeckOnly: false, lowerDeckOnly: false
+                    });
+                });
+                this.renderInventory();
+                this.showImportStatus(`&#10003; Импортировано ${items.length} позиций`, 'success');
+            } catch (err) {
+                this.showImportStatus('Ошибка: ' + err.message, 'error');
             }
-
-            this.results.pallets = newPallets;
-
-            // Update report and visualization only — NO re-packing
-            this.renderReport();
-            this.mdViz.update(this.results);
-
-            btn.innerHTML = originalHtml;
-            btn.disabled = false;
-        }, 500);
+        };
+        reader.readAsArrayBuffer(file);
+        e.target.value = '';
     }
 
-    shuffleArray(array) {
-        for (let i = array.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [array[i], array[j]] = [array[j], array[i]];
-        }
+    showToast(message, type = 'info') {
+        const container = document.getElementById('toast-container');
+        if (!container) return;
+        const toast = document.createElement('div');
+        toast.className = `toast toast-${type}`;
+        toast.textContent = message;
+        container.appendChild(toast);
+        setTimeout(() => toast.classList.add('toast-visible'), 10);
+        setTimeout(() => { toast.classList.remove('toast-visible'); setTimeout(() => toast.remove(), 400); }, 3000);
     }
 }
 

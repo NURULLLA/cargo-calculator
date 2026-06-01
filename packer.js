@@ -10,7 +10,7 @@ const TECH_KIT_WEIGHT_KG = 300;
 
 const CONFIG = {
     AIRCRAFT_NAME: "Boeing 757-200 PCF",
-    MAX_FUSELAGE_HEIGHT_CM: 208,
+    MAX_FUSELAGE_HEIGHT_CM: 205,
     DOOR_MAIN: { width: 340, height: 218 },
     DOOR_FWD_BELLY: { width: 140, height: 108 },
     DOOR_AFT_BELLY: { width: 140, height: 112 },
@@ -21,8 +21,8 @@ const CONFIG = {
             name: "PAG (High) - 15 positions",
             count: 15,
             length_cross: 301,  // real measured usable cm
-            width_long: 207,    // real measured usable cm
-            max_height: 208,
+            width_long: 209,    // real measured usable cm
+            max_height: 205,
             tare_weight: 110,
             contour_start_height: 114.3,
             contour_mid_height: 174.5,
@@ -38,8 +38,8 @@ const CONFIG = {
             name: "PMC (Wide) - 13 positions",
             count: 13,
             length_cross: 301,  // real measured usable cm
-            width_long: 227,    // real measured usable cm
-            max_height: 208,
+            width_long: 229,    // real measured usable cm
+            max_height: 205,
             tare_weight: 120,
             contour_start_height: 114.3,
             contour_mid_height: 174.5,
