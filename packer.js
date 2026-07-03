@@ -294,6 +294,27 @@ const Packer = {
         };
     },
 
+    // Simulates stacking a variant from the pallet's current height up to max_height,
+    // re-checking calculateLayer at each successive z so fuselage taper (which shrinks
+    // available width at greater height) is accounted for rather than assumed uniform.
+    // Returns the true achievable total count and the first layer's result (what
+    // actually gets applied this iteration).
+    simulateFullStack: (pallet, item, variant) => {
+        let h = pallet.currentHeight;
+        let total = 0;
+        let first = null;
+        while (true) {
+            const pseudoPallet = { config: pallet.config, currentHeight: h, getFuselageWidth: pallet.getFuselageWidth.bind(pallet) };
+            let res = Packer.calculateLayer(pseudoPallet, variant);
+            if (!res) break;
+            total += res.count;
+            if (!first) first = res;
+            h += variant.h;
+            if (item.noStack) break;
+        }
+        return { total, first };
+    },
+
     packAircraft: (configCode, cargoItems, options = {}) => {
         const config = CONFIG.PALLET_OPTIONS[configCode];
         const aircraftId = options.aircraftId || "UK75057";
@@ -370,19 +391,10 @@ const Packer = {
                         let maxTotalPotential = -1;
 
                         for (let variant of item.getVariants()) {
-                            let res = Packer.calculateLayer(p, variant);
-                            if (res) {
-                                let layersPossible = 1;
-                                if (!item.noStack) {
-                                    let remHeight = config.max_height - (p.currentHeight + variant.h);
-                                    layersPossible = 1 + Math.floor(remHeight / variant.h);
-                                }
-                                let totalPotential = res.count * layersPossible;
-
-                                if (totalPotential > maxTotalPotential) {
-                                    maxTotalPotential = totalPotential;
-                                    bestVariantResult = res;
-                                }
+                            let sim = Packer.simulateFullStack(p, item, variant);
+                            if (sim.first && sim.total > maxTotalPotential) {
+                                maxTotalPotential = sim.total;
+                                bestVariantResult = sim.first;
                             }
                         }
 
