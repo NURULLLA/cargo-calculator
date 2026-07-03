@@ -307,6 +307,13 @@ class CargoApp {
         this.renderInventory();
     }
 
+    toggleItemTipping(id) {
+        const item = this.cargo.find(c => c.id === id);
+        if (!item) return;
+        item.allowTipping = !item.allowTipping;
+        this.renderInventory();
+    }
+
     renderInventory() {
         const tbody = document.querySelector('#inventory-table tbody');
         tbody.innerHTML = '';
@@ -324,7 +331,9 @@ class CargoApp {
                     ${item.noStack ? '<span class="badge" style="background:#ef4444; color:white; padding:2px 4px; border-radius:4px; font-size:0.7em;">Top Only</span>' : ''}
                     ${item.mainDeckOnly ? '<span class="badge" style="background:#0ea5e9; color:white; padding:2px 4px; border-radius:4px; font-size:0.7em;">Main Deck Only</span>' : ''}
                     ${item.lowerDeckOnly ? '<span class="badge" style="background:#8b5cf6; color:white; padding:2px 4px; border-radius:4px; font-size:0.7em;">Lower Deck Only</span>' : ''}
-                    ${item.allowTipping ? '<span class="badge" style="background:#10b981; color:white; padding:2px 4px; border-radius:4px; font-size:0.7em;" title="Can be tipped/rotated"><i class="fas fa-rotate"></i> Tip OK</span>' : '<span class="badge" style="background:#6b7280; color:white; padding:2px 4px; border-radius:4px; font-size:0.7em;" title="Must stay upright"><i class="fas fa-up-long"></i> No Tip</span>'}
+                    <button class="badge tip-toggle-btn" data-id="${item.id}" style="cursor:pointer; border:none; ${item.allowTipping ? 'background:#10b981;' : 'background:#6b7280;'} color:white; padding:2px 4px; border-radius:4px; font-size:0.7em;" title="Click to toggle — ${item.allowTipping ? 'can be tipped/rotated' : 'must stay upright'}">
+                        <i class="fas ${item.allowTipping ? 'fa-rotate' : 'fa-up-long'}"></i> ${item.allowTipping ? 'Tip OK' : 'No Tip'}
+                    </button>
                 </td>
                 <td>
                     <button class="btn-danger" data-id="${item.id}">
@@ -333,6 +342,7 @@ class CargoApp {
                 </td>
             `;
             tr.querySelector('.btn-danger').addEventListener('click', () => this.removeCargoItem(item.id));
+            tr.querySelector('.tip-toggle-btn').addEventListener('click', () => this.toggleItemTipping(item.id));
             tbody.appendChild(tr);
         });
     }
