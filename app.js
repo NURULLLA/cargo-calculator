@@ -768,7 +768,9 @@ class CargoApp {
         const SW = 340, SH = 210, PAD = 2, LH = 22, dH = SH - LH;
         const sX = (SW-PAD*2) / config.length_cross, sY = (dH-PAD*2) / config.width_long;
         const dC = layer.dim_cross || 100, dL = layer.dim_long || 80;
-        const mC = layer.meta?.main?.r || 0, mR = layer.meta?.main?.c || 0, side = layer.meta?.side;
+        // meta.main.r = rows along the fuselage (вдоль), meta.main.c = columns across (поперёк) —
+        // see packer.js tryPartition() / ui_visualizer_main.js for the canonical convention.
+        const mC = layer.meta?.main?.c || 0, mR = layer.meta?.main?.r || 0, side = layer.meta?.side;
         let boxes = '';
         for (let r = 0; r < mR; r++) for (let c = 0; c < mC; c++) {
             const bx = PAD+c*dC*sX, by = PAD+r*dL*sY, bw = Math.max(2,dC*sX-1.5), bh = Math.max(2,dL*sY-1.5);
@@ -776,9 +778,16 @@ class CargoApp {
             if (bw>20&&bh>16) boxes += `<text x="${(bx+bw/2).toFixed(1)}" y="${(by+bh/2+4).toFixed(1)}" text-anchor="middle" font-size="10" fill="rgba(255,255,255,0.9)">&udarr;</text>`;
         }
         if (side?.count > 0) {
-            const ox = PAD+mC*dC*sX+3, sdC = dL, sdL = dC;
-            for (let r = 0; r < side.c; r++) for (let c = 0; c < side.r; c++) {
-                const bx = ox+c*sdC*sX, by = PAD+r*sdL*sY, bw = Math.max(2,sdC*sX-1.5), bh = Math.max(2,sdL*sY-1.5);
+            // Side block is rotated 90°, so its cross/long extents are swapped.
+            // Its position offset depends on which axis the leftover gap is on:
+            // a HORIZONTAL split leaves the gap further along the fuselage (shift Y/rows),
+            // a VERTICAL split leaves the gap further across the fuselage (shift X/cols).
+            const isHorizontal = side.type === 'HORIZONTAL';
+            const sdC = dL, sdL = dC;
+            const ox = isHorizontal ? PAD : PAD + mC*dC*sX + 3;
+            const oy = isHorizontal ? PAD + mR*dL*sY + 3 : PAD;
+            for (let r = 0; r < side.r; r++) for (let c = 0; c < side.c; c++) {
+                const bx = ox+c*sdC*sX, by = oy+r*sdL*sY, bw = Math.max(2,sdC*sX-1.5), bh = Math.max(2,sdL*sY-1.5);
                 boxes += `<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="#f59e0b" opacity="0.85" rx="2" stroke="white" stroke-width="0.5"/>`;
                 if (bw>16&&bh>14) boxes += `<text x="${(bx+bw/2).toFixed(1)}" y="${(by+bh/2+4).toFixed(1)}" text-anchor="middle" font-size="10" fill="rgba(255,255,255,0.9)">&harr;</text>`;
             }
@@ -796,7 +805,7 @@ class CargoApp {
         const C = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899'];
         const col = C[idx % C.length];
         const dC = layer.dim_cross||'?', dL = layer.dim_long||'?';
-        const mC = layer.meta?.main?.r||0, mR = layer.meta?.main?.c||0, side = layer.meta?.side;
+        const mC = layer.meta?.main?.c||0, mR = layer.meta?.main?.r||0, side = layer.meta?.side;
         const instr = layer.orient_type === 'A'
             ? `Класть коробку <strong style="color:#f59e0b">длинной стороной (${dC}см) ПОПЕРЁК самолёта</strong> &mdash; длина уходит влево-вправо.`
             : `Класть коробку <strong style="color:#f59e0b">короткой стороной (${dC}см) ПОПЕРЁК самолёта</strong>, длинная сторона (${dL}см) идёт вдоль нос-хвост.`;
