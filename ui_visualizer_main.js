@@ -95,8 +95,17 @@ class MainDeckViz {
 
                 const dimZ = layer.dim_cross;
                 const dimX = layer.dim_long;
-                const rowsX = layer.meta.main.r || 0; 
-                const colsZ = layer.meta.main.c || 0; 
+                const rowsX = layer.meta.main.r || 0;
+                const colsZ = layer.meta.main.c || 0;
+
+                // layer.meta = геометрическая ёмкость слоя, layer.count = сколько коробок
+                // реально положили. Рисуем только реальные коробки, иначе на схеме появляются
+                // «призраки» (напр. 1 коробка в заголовке, но 5 нарисованных).
+                const capMain = rowsX * colsZ;
+                const capSide = layer.meta.side ? (layer.meta.side.count || 0) : 0;
+                const placedTotal = Math.min(layer.count ?? (capMain + capSide), capMain + capSide);
+                const placedMain = Math.min(placedTotal, capMain);
+                const placedSide = Math.max(0, placedTotal - placedMain);
 
                 const paletteWidthZ = p.config.length_cross;
                 const paletteLengthX = p.config.width_long;
@@ -110,8 +119,10 @@ class MainDeckViz {
                 const edgeMat = new THREE.LineBasicMaterial({ color: 0x0c4a6e });
 
                 // Draw Main Block
+                let drawnMain = 0;
                 for (let r = 0; r < rowsX; r++) {
                     for (let c = 0; c < colsZ; c++) {
+                        if (drawnMain++ >= placedMain) continue;
                         const mesh = new THREE.Mesh(boxGeom, boxMat.clone());
                         mesh.add(new THREE.LineSegments(boxEdges, edgeMat));
 
@@ -124,7 +135,7 @@ class MainDeckViz {
                 }
 
                 // Draw Side Block (if exists)
-                if (layer.meta.side) {
+                if (layer.meta.side && placedSide > 0) {
                     const isHorizontal = layer.meta.side.type === 'HORIZONTAL';
                     
                     const sDimZ = dimX; // rotate: side dimensions are swapped
@@ -144,8 +155,10 @@ class MainDeckViz {
                     const sBoxGeom = new THREE.BoxGeometry(sDimX - 1, layer.height - 1, sDimZ - 1);
                     const sBoxEdges = new THREE.EdgesGeometry(sBoxGeom);
 
+                    let drawnSide = 0;
                     for (let r = 0; r < sRowsX; r++) {
                         for (let c = 0; c < sColsZ; c++) {
+                            if (drawnSide++ >= placedSide) continue;
                             const mesh = new THREE.Mesh(sBoxGeom, boxMat.clone());
                             mesh.add(new THREE.LineSegments(sBoxEdges, edgeMat));
 

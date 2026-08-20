@@ -419,6 +419,11 @@ const Packer = {
                     p.layers.push({
                         box_name: bestLayerCandidate.name,
                         count: toTake,
+                        // Geometric capacity of this layer. `count` may be lower when the
+                        // batch ran out of boxes or a weight limit capped the layer, so the
+                        // renderers must never draw the full meta grid — see _layerPlacement().
+                        capacity: bestLayerCandidate.count,
+                        weight: bestLayerCandidate.weight,
                         height: bestLayerCandidate.height,
                         z_start: p.currentHeight,
                         z_end: p.currentHeight + bestLayerCandidate.height,

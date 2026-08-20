@@ -763,6 +763,23 @@ class CargoApp {
         return `<div class="mf-svg-wrap"><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="max-width:100%">${grid}${rects}</svg></div>`;
     }
 
+    // ─── Сколько коробок реально стоит в слое ────────────────────
+    // layer.meta описывает ГЕОМЕТРИЧЕСКУЮ ёмкость слоя, а layer.count — сколько
+    // коробок туда реально положили (партия могла закончиться или упереться в лимит
+    // по весу). Схема должна рисовать именно layer.count, а не всю сетку.
+    _layerPlacement(layer) {
+        const mC = layer.meta?.main?.c || 0, mR = layer.meta?.main?.r || 0;
+        const side = layer.meta?.side || null;
+        const capMain = mC * mR;
+        const capSide = side?.count || 0;
+        const capacity = capMain + capSide;
+        // Старые результаты без layer.count трактуем как полностью заполненный слой
+        const total = Math.min(layer.count ?? capacity, capacity);
+        const mainCount = Math.min(total, capMain);
+        const sideCount = Math.max(0, total - mainCount);
+        return { mC, mR, side, capMain, capSide, capacity, total, mainCount, sideCount, partial: total < capacity };
+    }
+
     // ─── SVG: вид сверху одного слоя ─────────────────────────────
     _renderTopViewSVG(layer, config, color) {
         const SW = 340, SH = 210, PAD = 2, LH = 22, dH = SH - LH;
@@ -770,10 +787,14 @@ class CargoApp {
         const dC = layer.dim_cross || 100, dL = layer.dim_long || 80;
         // meta.main.r = rows along the fuselage (вдоль), meta.main.c = columns across (поперёк) —
         // see packer.js tryPartition() / ui_visualizer_main.js for the canonical convention.
-        const mC = layer.meta?.main?.c || 0, mR = layer.meta?.main?.r || 0, side = layer.meta?.side;
-        let boxes = '';
+        const { mC, mR, side, mainCount, sideCount, partial } = this._layerPlacement(layer);
+        // Пустое место в слое рисуем пунктиром, чтобы было видно: коробок меньше, чем влезает
+        const emptySlot = (x, y, w, h) =>
+            `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="none" opacity="0.35" rx="2" stroke="#64748b" stroke-width="1" stroke-dasharray="4,3"/>`;
+        let boxes = '', drawnMain = 0;
         for (let r = 0; r < mR; r++) for (let c = 0; c < mC; c++) {
             const bx = PAD+c*dC*sX, by = PAD+r*dL*sY, bw = Math.max(2,dC*sX-1.5), bh = Math.max(2,dL*sY-1.5);
+            if (drawnMain++ >= mainCount) { boxes += emptySlot(bx, by, bw, bh); continue; }
             boxes += `<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="${color}" opacity="0.82" rx="2" stroke="white" stroke-width="0.5"/>`;
             if (bw>20&&bh>16) boxes += `<text x="${(bx+bw/2).toFixed(1)}" y="${(by+bh/2+4).toFixed(1)}" text-anchor="middle" font-size="10" fill="rgba(255,255,255,0.9)">&udarr;</text>`;
         }
@@ -786,8 +807,10 @@ class CargoApp {
             const sdC = dL, sdL = dC;
             const ox = isHorizontal ? PAD : PAD + mC*dC*sX + 3;
             const oy = isHorizontal ? PAD + mR*dL*sY + 3 : PAD;
+            let drawnSide = 0;
             for (let r = 0; r < side.r; r++) for (let c = 0; c < side.c; c++) {
                 const bx = ox+c*sdC*sX, by = oy+r*sdL*sY, bw = Math.max(2,sdC*sX-1.5), bh = Math.max(2,sdL*sY-1.5);
+                if (drawnSide++ >= sideCount) { boxes += emptySlot(bx, by, bw, bh); continue; }
                 boxes += `<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="#f59e0b" opacity="0.85" rx="2" stroke="white" stroke-width="0.5"/>`;
                 if (bw>16&&bh>14) boxes += `<text x="${(bx+bw/2).toFixed(1)}" y="${(by+bh/2+4).toFixed(1)}" text-anchor="middle" font-size="10" fill="rgba(255,255,255,0.9)">&harr;</text>`;
             }
@@ -796,7 +819,8 @@ class CargoApp {
         const ax = `<text x="${SW/2}" y="${dH+14}" text-anchor="middle" font-size="8" fill="#64748b">&larr; ПОПЕРЁК ФЮЗЕЛЯЖА (${config.length_cross}см) &rarr;</text>`;
         const lY = dH+2;
         const leg = `<rect x="2" y="${lY}" width="9" height="9" fill="${color}" rx="1"/><text x="14" y="${lY+8}" font-size="7.5" fill="#94a3b8">Обычно (&uarr;&darr; вдоль)</text>`
-            + (side ? `<rect x="110" y="${lY}" width="9" height="9" fill="#f59e0b" rx="1"/><text x="122" y="${lY+8}" font-size="7.5" fill="#94a3b8">Повёрнуто 90&deg; (&harr;)</text>` : '');
+            + (sideCount > 0 ? `<rect x="110" y="${lY}" width="9" height="9" fill="#f59e0b" rx="1"/><text x="122" y="${lY+8}" font-size="7.5" fill="#94a3b8">Повёрнуто 90&deg; (&harr;)</text>` : '')
+            + (partial ? `<rect x="228" y="${lY}" width="9" height="9" fill="none" stroke="#64748b" stroke-width="1" stroke-dasharray="3,2" rx="1"/><text x="240" y="${lY+8}" font-size="7.5" fill="#94a3b8">Свободно (нет груза)</text>` : '');
         return `<div class="mf-svg-wrap"><svg width="${SW}" height="${SH}" viewBox="0 0 ${SW} ${SH}" style="max-width:100%">${outline}${boxes}${ax}${leg}</svg></div>`;
     }
 
@@ -805,7 +829,11 @@ class CargoApp {
         const C = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899'];
         const col = C[idx % C.length];
         const dC = layer.dim_cross||'?', dL = layer.dim_long||'?';
-        const mC = layer.meta?.main?.c||0, mR = layer.meta?.main?.r||0, side = layer.meta?.side;
+        const pl = this._layerPlacement(layer);
+        const { mC, mR, side, mainCount, sideCount, capacity, total, partial } = pl;
+        // Реально занятые колонны/ряды основного блока (последний ряд может быть неполным)
+        const usedCols = mainCount > 0 ? Math.min(mC, mainCount) : 0;
+        const usedRows = mainCount > 0 ? Math.ceil(mainCount / (mC || 1)) : 0;
         const instr = layer.orient_type === 'A'
             ? `Класть коробку <strong style="color:#f59e0b">длинной стороной (${dC}см) ПОПЕРЁК самолёта</strong> &mdash; длина уходит влево-вправо.`
             : `Класть коробку <strong style="color:#f59e0b">короткой стороной (${dC}см) ПОПЕРЁК самолёта</strong>, длинная сторона (${dL}см) идёт вдоль нос-хвост.`;
@@ -836,11 +864,13 @@ class CargoApp {
                     <table class="mf-spec-table">
                         <tr><td>Название</td><td><strong>${layer.box_name||'—'}</strong></td></tr>
                         <tr><td>Размер (попер&times;вдоль&times;выс)</td><td><strong>${dC}&times;${dL}&times;${layer.height}см</strong></td></tr>
-                        <tr><td>Колонны поперёк</td><td>${mC} шт. &times; ${dC}см = <strong>${(mC * +dC).toFixed(0)}см</strong></td></tr>
-                        <tr><td>Ряды вдоль</td><td>${mR} шт. &times; ${dL}см = <strong>${(mR * +dL).toFixed(0)}см</strong></td></tr>
-                        ${side?`<tr class="mf-side-row"><td>+ Повёрнутые 90&deg;</td><td>${side.count} шт. &mdash; <span style="color:#f59e0b">жёлтые на схеме</span></td></tr>`:''}
+                        <tr><td>Ставим в этот слой</td><td><strong>${total} шт.</strong> <span style="color:var(--text-muted)">(влезает ${capacity})</span></td></tr>
+                        <tr><td>Колонны поперёк</td><td>${usedCols} шт. &times; ${dC}см = <strong>${(usedCols * +dC).toFixed(0)}см</strong> <span style="color:var(--text-muted)">(макс ${mC})</span></td></tr>
+                        <tr><td>Ряды вдоль</td><td>${usedRows} шт. &times; ${dL}см = <strong>${(usedRows * +dL).toFixed(0)}см</strong> <span style="color:var(--text-muted)">(макс ${mR})</span></td></tr>
+                        ${sideCount>0?`<tr class="mf-side-row"><td>+ Повёрнутые 90&deg;</td><td>${sideCount} шт. &mdash; <span style="color:#f59e0b">жёлтые на схеме</span></td></tr>`:''}
                     </table>
-                    ${side?`<div class="mf-side-note">&#9888; Жёлтые коробки повёрнуты: ${dL}см поперёк, ${dC}см вдоль.</div>`:''}
+                    ${sideCount>0?`<div class="mf-side-note">&#9888; Жёлтые коробки повёрнуты: ${dL}см поперёк, ${dC}см вдоль.</div>`:''}
+                    ${partial?`<div class="mf-side-note">&#9888; Слой заполнен не полностью: груза хватило только на ${total} из ${capacity} мест. Пунктир на схеме &mdash; свободное место.</div>`:''}
                 </div>
             </div>
         </div>`;
