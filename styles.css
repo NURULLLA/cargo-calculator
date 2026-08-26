@@ -1056,3 +1056,6 @@ tr:hover td {
 .qty-cell { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .qty-num { font-weight: 700; min-width: 1.6em; }
 .row-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* Build stamp in the sidebar — makes a stale browser cache obvious at a glance */
+.sidebar-footer .build-note { font-size: 0.68rem; opacity: 0.6; margin-top: 2px; }
