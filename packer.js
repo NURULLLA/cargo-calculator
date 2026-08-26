@@ -8,6 +8,10 @@
 // This applies to BOTH aircraft (UK75057 and UK75058).
 const TECH_KIT_WEIGHT_KG = 300;
 
+// Belly holds have no loading equipment — ground crew load every box by hand
+// through the hatch, so a single box may not exceed this weight.
+const LOWER_DECK_MAX_BOX_KG = 75;
+
 const CONFIG = {
     AIRCRAFT_NAME: "Boeing 757-200 PCF",
     MAX_FUSELAGE_HEIGHT_CM: 205,
@@ -315,6 +319,297 @@ const Packer = {
         return { total, first };
     },
 
+    // ─────────────────────────────────────────────────────────────────────
+    //  MIXED-TIER PACKING CORE
+    //
+    //  Both the main-deck pallets and the belly compartments are packed as a
+    //  stack of horizontal tiers, and a tier may hold SEVERAL different box
+    //  types side by side. Previously one tier held one box type, so a single
+    //  small carton consumed the entire footprint for its full height — which
+    //  is why a 70 m³ manifest did not fit into a 250 m³ aircraft.
+    //
+    //  A "container" is anything with a floor and a ceiling:
+    //    { crossWidth, longLength, maxHeight, currentHeight }
+    //  where crossWidth may be a function of height (fuselage taper on a pallet)
+    //  or a plain number (constant belly floor width).
+    // ─────────────────────────────────────────────────────────────────────
+
+    containerWidthAt: (container, z) =>
+        typeof container.crossWidth === 'function' ? container.crossWidth(z) : container.crossWidth,
+
+    // All footprints an item can present once a variant has fixed which
+    // dimension points up: the other two may still be laid either way round.
+    footprintsFor: (variant) => {
+        if (variant.l === variant.w) return [{ w: variant.l, l: variant.w }];
+        return [
+            { w: variant.l, l: variant.w },   // long side across
+            { w: variant.w, l: variant.l }    // long side along
+        ];
+    },
+
+    // MaxRects free-space update: every free rectangle that the newly placed box
+    // overlaps is cut into the (up to four) maximal rectangles that remain, then
+    // rectangles fully contained in another are dropped. Keeping MAXIMAL — i.e.
+    // overlapping — free rectangles is what lets the packer mix orientations in
+    // one tier; a plain guillotine split loses roughly one box in five.
+    rectContains: (inner, outer) =>
+        inner.x >= outer.x - 1e-6 && inner.y >= outer.y - 1e-6 &&
+        inner.x + inner.w <= outer.x + outer.w + 1e-6 &&
+        inner.y + inner.l <= outer.y + outer.l + 1e-6,
+
+    updateFreeRects: (freeList, used) => {
+        const out = [];
+        for (const fr of freeList) {
+            const disjoint = used.x >= fr.x + fr.w - 1e-6 || used.x + used.w <= fr.x + 1e-6 ||
+                             used.y >= fr.y + fr.l - 1e-6 || used.y + used.l <= fr.y + 1e-6;
+            if (disjoint) { out.push(fr); continue; }
+            if (used.x > fr.x + 1e-6)
+                out.push({ x: fr.x, y: fr.y, w: used.x - fr.x, l: fr.l });
+            if (used.x + used.w < fr.x + fr.w - 1e-6)
+                out.push({ x: used.x + used.w, y: fr.y, w: fr.x + fr.w - used.x - used.w, l: fr.l });
+            if (used.y > fr.y + 1e-6)
+                out.push({ x: fr.x, y: fr.y, w: fr.w, l: used.y - fr.y });
+            if (used.y + used.l < fr.y + fr.l - 1e-6)
+                out.push({ x: fr.x, y: used.y + used.l, w: fr.w, l: fr.y + fr.l - used.y - used.l });
+        }
+
+        const kept = [];
+        for (let i = 0; i < out.length; i++) {
+            if (out[i].w < 0.01 || out[i].l < 0.01) continue;
+            let redundant = false;
+            for (let j = 0; j < out.length; j++) {
+                if (i === j || out[j].w < 0.01 || out[j].l < 0.01) continue;
+                if (Packer.rectContains(out[i], out[j])) {
+                    // Identical rectangles contain each other — keep the first only.
+                    if (!Packer.rectContains(out[j], out[i]) || j < i) { redundant = true; break; }
+                }
+            }
+            if (!redundant) kept.push(out[i]);
+        }
+        return kept;
+    },
+
+    /**
+     * Optimal regular layout for a run of IDENTICAL rectangles: a main grid plus
+     * an optional 90°-rotated block in the leftover strip. For uniform cargo this
+     * beats any incremental placement, so a tier is seeded with it.
+     * Returns explicit { x, y, w, l } positions.
+     */
+    gridLayout: (availCross, availLong, fpA, fpB) => {
+        let best = [];
+        const consider = (dimCross, dimLong, rotCross, rotLong) => {
+            const cols = Math.floor(availCross / dimCross);
+            const rows = Math.floor(availLong / dimLong);
+            if (cols < 1 || rows < 1) return;
+
+            const layout = [];
+            for (let r = 0; r < rows; r++)
+                for (let c = 0; c < cols; c++)
+                    layout.push({ x: c * dimCross, y: r * dimLong, w: dimCross, l: dimLong });
+
+            // Rotated block in the strip left over across the container
+            const remCross = availCross - cols * dimCross;
+            if (rotCross > 0 && remCross >= rotCross && availLong >= rotLong) {
+                const sCols = Math.floor(remCross / rotCross);
+                const sRows = Math.floor(availLong / rotLong);
+                for (let r = 0; r < sRows; r++)
+                    for (let c = 0; c < sCols; c++)
+                        layout.push({ x: cols * dimCross + c * rotCross, y: r * rotLong, w: rotCross, l: rotLong });
+            }
+
+            // Rotated block in the strip left over along the container
+            const remLong = availLong - rows * dimLong;
+            if (rotLong > 0 && remLong >= rotLong && availCross >= rotCross) {
+                const sRows = Math.floor(remLong / rotLong);
+                const sCols = Math.floor(availCross / rotCross);
+                for (let r = 0; r < sRows; r++)
+                    for (let c = 0; c < sCols; c++)
+                        layout.push({ x: c * rotCross, y: rows * dimLong + r * rotLong, w: rotCross, l: rotLong });
+            }
+
+            if (layout.length > best.length) best = layout;
+        };
+
+        consider(fpA.w, fpA.l, fpB.w, fpB.l);
+        if (fpB) consider(fpB.w, fpB.l, fpA.w, fpA.l);
+        return best;
+    },
+
+    /**
+     * Fills ONE tier of a container with a mix of box types.
+     *
+     * @param {Object} container  { crossWidth, longLength, maxHeight, currentHeight }
+     * @param {number} tierHeight vertical space this tier consumes
+     * @param {Array}  candidates [{ item, variant }] usable in this container
+     * @param {Object} caps       { weightRemaining, grossRemaining, volumeRemaining }
+     * @param {boolean} seedGrid  start from the optimal grid of the largest box type
+     * @returns {Object|null} { placements, placedWeight, placedVolume, height, availCross }
+     */
+    fillTier: (container, tierHeight, candidates, caps, seedGrid) => {
+        const topZ = container.currentHeight + tierHeight;
+        if (topZ > container.maxHeight + 0.001) return null;
+
+        // The usable width is the narrowest point the stack reaches, i.e. the
+        // width at the TOP of the tier (matters where the fuselage tapers).
+        const availCross = Packer.containerWidthAt(container, topZ);
+        const availLong = container.longLength;
+        if (availCross <= 0 || availLong <= 0) return null;
+
+        // Biggest footprints first, so large boxes claim open floor before
+        // small ones fragment it.
+        const entries = candidates
+            .filter(c => c.variant.h <= tierHeight + 0.001)
+            .map(c => ({
+                item: c.item,
+                variant: c.variant,
+                footprints: Packer.footprintsFor(c.variant),
+                taken: 0
+            }))
+            .filter(e => e.footprints.some(fp => fp.w <= availCross && fp.l <= availLong))
+            .sort((a, b) => {
+                const areaA = a.variant.l * a.variant.w, areaB = b.variant.l * b.variant.w;
+                if (areaB !== areaA) return areaB - areaA;
+                return b.variant.h - a.variant.h;
+            });
+
+        if (!entries.length) return null;
+
+        let free = [{ x: 0, y: 0, w: availCross, l: availLong }];
+        const placements = [];
+        let placedWeight = 0, placedVolume = 0;
+
+        // Cargo is centred across the container, so any taper stays symmetric.
+        const crossOffset = (Packer.containerWidthAt(container, 0) - availCross) / 2;
+
+        // Stock is shared between entries of the same item (one entry per
+        // variant), so track consumption per item as well as per entry.
+        const usedPerItem = new Map();
+
+        const admit = (e, pos) => {
+            const unitVolume = (e.variant.l * e.variant.w * e.variant.h) / 1000000;
+            const alreadyUsed = usedPerItem.get(e.item) || 0;
+            if (e.item.count - alreadyUsed <= 0) return false;
+            if (placedWeight + e.variant.weight > caps.weightRemaining + 0.001) return false;
+            if (placedWeight + e.variant.weight > caps.grossRemaining + 0.001) return false;
+            if (caps.volumeRemaining !== undefined &&
+                placedVolume + unitVolume > caps.volumeRemaining + 1e-9) return false;
+
+            placements.push({
+                item: e.item,
+                name: e.variant.name,
+                x: crossOffset + pos.x,
+                y: pos.y,
+                w: pos.w,
+                l: pos.l,
+                h: e.variant.h,
+                weight: e.variant.weight
+            });
+            free = Packer.updateFreeRects(free, pos);
+            usedPerItem.set(e.item, alreadyUsed + 1);
+            placedWeight += e.variant.weight;
+            placedVolume += unitVolume;
+            return true;
+        };
+
+        // Seed with the optimal regular grid of the largest box type. For a
+        // uniform manifest this alone is the answer; for a mixed one the
+        // remaining gaps are filled incrementally below.
+        if (seedGrid) {
+            const e = entries[0];
+            const fps = e.footprints.filter(fp => fp.w <= availCross && fp.l <= availLong);
+            if (fps.length) {
+                const layout = Packer.gridLayout(availCross, availLong, fps[0], fps[1] || fps[0]);
+                for (const pos of layout) if (!admit(e, pos)) break;
+            }
+        }
+
+        let progress = true;
+        while (progress) {
+            progress = false;
+            for (const e of entries) {
+                if (e.item.count - (usedPerItem.get(e.item) || 0) <= 0) continue;
+
+                // Best short-side fit over every free rectangle / orientation
+                let best = null;
+                for (let i = 0; i < free.length; i++) {
+                    const fr = free[i];
+                    for (const fp of e.footprints) {
+                        if (fp.w > fr.w + 0.001 || fp.l > fr.l + 0.001) continue;
+                        const leftover = Math.min(fr.w - fp.w, fr.l - fp.l);
+                        if (!best || leftover < best.leftover) best = { idx: i, fp, leftover };
+                    }
+                }
+                if (!best) continue;
+
+                const fr = free[best.idx];
+                if (!admit(e, { x: fr.x, y: fr.y, w: best.fp.w, l: best.fp.l })) continue;
+                progress = true;
+                break; // restart from the biggest box again
+            }
+        }
+
+        if (!placements.length) return null;
+        return { placements, placedWeight, placedVolume, height: tierHeight, availCross };
+    },
+
+    /**
+     * Chooses the tier height that packs the most volume per centimetre of
+     * stack height — stack height is the scarce resource — and returns that tier.
+     *
+     * @param {Function} variantFilter optional (item, variant) => boolean
+     */
+    buildBestTier: (container, items, caps, variantFilter) => {
+        const headroom = container.maxHeight - container.currentHeight;
+        if (headroom <= 0) return null;
+
+        const candidates = [];
+        const heightSet = new Set();
+        for (const item of items) {
+            if (item.count <= 0) continue;
+            if (item.weight > caps.weightRemaining || item.weight > caps.grossRemaining) continue;
+            for (const variant of item.getVariants()) {
+                if (variant.h > headroom + 0.001) continue;
+                if (variantFilter && !variantFilter(item, variant)) continue;
+                candidates.push({ item, variant });
+                heightSet.add(variant.h);
+            }
+        }
+        if (!candidates.length) return null;
+
+        // Trying every distinct height is wasteful on large manifests; a spread
+        // of them finds the same answer in practice.
+        let heights = Array.from(heightSet).sort((a, b) => b - a);
+        if (heights.length > 24) {
+            const step = heights.length / 24;
+            const sampled = [];
+            for (let i = 0; i < 24; i++) sampled.push(heights[Math.floor(i * step)]);
+            heights = Array.from(new Set(sampled));
+        }
+
+        let best = null, bestScore = -1;
+        for (const h of heights) {
+            // Grid-seeded and free-form fills win in different situations
+            // (uniform vs. mixed cargo), so try both and keep the fuller tier.
+            for (const seedGrid of [true, false]) {
+                const tier = Packer.fillTier(container, h, candidates, caps, seedGrid);
+                if (!tier) continue;
+                const score = tier.placedVolume / h;   // m³ gained per cm of height
+                if (score > bestScore) { bestScore = score; best = tier; }
+            }
+        }
+        return best;
+    },
+
+    // Groups a tier's individual placements into per-box-type rows for reports.
+    summariseTier: (placements) => {
+        const byType = new Map();
+        for (const pl of placements) {
+            const key = `${pl.name}_${pl.w}x${pl.l}x${pl.h}`;
+            if (byType.has(key)) byType.get(key).count++;
+            else byType.set(key, { name: pl.name, w: pl.w, l: pl.l, h: pl.h, weight: pl.weight, count: 1 });
+        }
+        return Array.from(byType.values()).sort((a, b) => b.count - a.count);
+    },
     packAircraft: (configCode, cargoItems, options = {}) => {
         const config = CONFIG.PALLET_OPTIONS[configCode];
         const aircraftId = options.aircraftId || "UK75057";
@@ -373,71 +668,100 @@ const Packer = {
         const packToPallets = (targetItems) => {
             sortForMain(targetItems);
             for (let p of pallets) {
+                // A pallet is a container whose usable width shrinks with height
+                // because of the fuselage taper.
+                const container = {
+                    crossWidth: (z) => Math.min(p.config.length_cross, p.getFuselageWidth(z)),
+                    longLength: p.config.width_long,
+                    maxHeight: p.config.max_height,
+                    currentHeight: p.currentHeight
+                };
+
                 while (true) {
                     if (targetItems.every(x => x.count === 0)) break;
                     if (currentTotalGross >= maxGrossLimit) break;
+                    if (p.currentHeight >= p.config.max_height) break;
 
-                    let bestLayerCandidate = null;
-                    let itemToTake = null;
-                    let bestOverallPotential = -1;
+                    container.currentHeight = p.currentHeight;
+                    const caps = {
+                        weightRemaining: p.remainingWeight(),
+                        grossRemaining: maxGrossLimit - currentTotalGross
+                    };
+                    if (caps.weightRemaining <= 0 || caps.grossRemaining <= 0) break;
 
-                    for (let item of targetItems) {
-                        if (item.count <= 0) continue;
-                        if (!Packer.fitsThroughDoor(item, CONFIG.DOOR_MAIN)) continue;
-                        if (p.remainingWeight() < item.weight) continue;
-                        if (currentTotalGross + item.weight > maxGrossLimit) continue;
+                    // Only boxes that clear the main cargo door
+                    const tier = Packer.buildBestTier(container, targetItems, caps,
+                        (item) => Packer.fitsThroughDoor(item, CONFIG.DOOR_MAIN));
+                    if (!tier) break;
 
-                        let bestVariantResult = null;
-                        let maxTotalPotential = -1;
-
-                        for (let variant of item.getVariants()) {
-                            let sim = Packer.simulateFullStack(p, item, variant);
-                            if (sim.first && sim.total > maxTotalPotential) {
-                                maxTotalPotential = sim.total;
-                                bestVariantResult = sim.first;
-                            }
-                        }
-
-                        if (bestVariantResult && maxTotalPotential > bestOverallPotential) {
-                            bestOverallPotential = maxTotalPotential;
-                            bestLayerCandidate = bestVariantResult;
-                            itemToTake = item;
-                        }
-                    }
-                    if (!bestLayerCandidate) break;
-
-                    let toTake = Math.min(bestLayerCandidate.count, itemToTake.count);
-                    if (p.remainingWeight() < toTake * bestLayerCandidate.weight) {
-                        toTake = Math.floor(p.remainingWeight() / itemToTake.weight);
-                    }
-                    if (currentTotalGross + (toTake * bestLayerCandidate.weight) > maxGrossLimit) {
-                        toTake = Math.floor((maxGrossLimit - currentTotalGross) / bestLayerCandidate.weight);
+                    // Commit: consume stock, weight and stack height
+                    let closePallet = false;
+                    for (const pl of tier.placements) {
+                        pl.item.count -= 1;
+                        if (pl.item.noStack) closePallet = true;
                     }
 
-                    if (toTake <= 0) break;
+                    p.currentWeight += tier.placedWeight;
+                    currentTotalGross += tier.placedWeight;
+
+                    const contents = Packer.summariseTier(tier.placements);
+                    const dominant = contents[0];
 
                     p.layers.push({
-                        box_name: bestLayerCandidate.name,
-                        count: toTake,
-                        height: bestLayerCandidate.height,
+                        box_name: contents.length > 1 ? `Mixed — ${contents.length} types` : dominant.name,
+                        count: tier.placements.length,
+                        height: tier.height,
                         z_start: p.currentHeight,
-                        z_end: p.currentHeight + bestLayerCandidate.height,
-                        meta: bestLayerCandidate.meta,
-                        orient_type: bestLayerCandidate.orientType,
-                        dim_cross: bestLayerCandidate.dim_cross,
-                        dim_long: bestLayerCandidate.dim_long
+                        z_end: p.currentHeight + tier.height,
+                        weight: dominant.weight,
+                        total_weight: tier.placedWeight,
+                        placements: tier.placements.map(pl => ({
+                            name: pl.name, x: pl.x, y: pl.y, w: pl.w, l: pl.l, h: pl.h, weight: pl.weight
+                        })),
+                        contents,
+                        avail_cross: tier.availCross,
+                        meta: { main: { r: 0, c: 0 }, side: null },
+                        orient_type: dominant.w >= dominant.l ? 'A' : 'B',
+                        dim_cross: dominant.w,
+                        dim_long: dominant.l
                     });
-                    p.currentWeight += toTake * bestLayerCandidate.weight;
-                    currentTotalGross += toTake * bestLayerCandidate.weight;
-                    p.currentHeight += bestLayerCandidate.height;
-                    itemToTake.count -= toTake;
 
-                    if (itemToTake.noStack) p.currentHeight = p.config.max_height;
+                    p.currentHeight += tier.height;
+                    if (closePallet) p.currentHeight = p.config.max_height;
                 }
             }
         };
 
         let lowerDeckResults = [];
+
+        // Usable floor width of a belly compartment. The AFT hold narrows toward
+        // the tail, so it carries a conservative minimum width.
+        const bellyFloorWidth = (hold, compSpec) =>
+            compSpec.floor_width_cm || hold.min_floor_width_cm || hold.floor_width_cm;
+
+        const passesHatch = (item, hold) => {
+            const [i_min, i_mid] = item.dims;
+            const d_min = Math.min(hold.door.width, hold.door.height);
+            const d_max = Math.max(hold.door.width, hold.door.height);
+            return i_min <= d_min && i_mid <= d_max;
+        };
+
+        // Can this box ride in the belly at all — hatch, manual-lift limit, and
+        // does it physically fit inside at least one compartment?
+        const bellyEligible = (item) => {
+            if (item.weight > LOWER_DECK_MAX_BOX_KG) return false;
+            return CONFIG.LOWER_DECK.some(hold => {
+                if (!passesHatch(item, hold)) return false;
+                return hold.compartments.some(cs => {
+                    const floorW = bellyFloorWidth(hold, cs);
+                    return item.getVariants().some(v =>
+                        v.h <= cs.max_height_cm &&
+                        Math.min(v.l, v.w) <= floorW &&
+                        Math.max(v.l, v.w) <= Math.max(floorW, cs.max_length_cm));
+                });
+            });
+        };
+
         const packToLowerDeck = (targetItems) => {
             if (mainDeckOnlyGlobal) return;
             for (let hold of CONFIG.LOWER_DECK) {
@@ -445,95 +769,104 @@ const Packer = {
                 if (!holdRes) {
                     holdRes = { name: hold.name, current_weight: 0, compartments: [] };
                     hold.compartments.forEach(comp => {
-                        holdRes.compartments.push({ id: comp.id, name: comp.name, items: [], weight: 0, volume: 0, max_weight: comp.max_weight, max_volume: comp.max_volume });
+                        holdRes.compartments.push({
+                            id: comp.id, name: comp.name, items: [], tiers: [],
+                            weight: 0, volume: 0, height_used: 0,
+                            max_weight: comp.max_weight, max_volume: comp.max_volume,
+                            max_length_cm: comp.max_length_cm, max_height_cm: comp.max_height_cm,
+                            floor_width_cm: bellyFloorWidth(hold, comp)
+                        });
                     });
                     lowerDeckResults.push(holdRes);
                 }
 
                 for (let compData of holdRes.compartments) {
                     const compSpec = hold.compartments.find(c => c.id === compData.id);
-                    for (let item of targetItems) {
-                        if (item.count <= 0) continue;
+
+                    // A compartment is a box-shaped container: floor width across,
+                    // usable corridor length along, ceiling above.
+                    const container = {
+                        crossWidth: compData.floor_width_cm,
+                        longLength: compSpec.max_length_cm,
+                        maxHeight: compSpec.max_height_cm,
+                        currentHeight: compData.height_used
+                    };
+
+                    while (true) {
+                        if (targetItems.every(x => x.count === 0)) break;
                         if (currentTotalGross >= maxGrossLimit) break;
-
-                        // BUG FIX: Also enforce hold-level total weight cap
                         if (holdRes.current_weight >= hold.max_weight) break;
+                        if (compData.weight >= compSpec.max_weight) break;
+                        if (compData.height_used >= compSpec.max_height_cm) break;
 
-                        let [i_min, i_mid] = item.dims;
-                        let d_min = Math.min(hold.door.width, hold.door.height);
-                        let d_max = Math.max(hold.door.width, hold.door.height);
-                        if (!(i_min <= d_min && i_mid <= d_max)) continue;
+                        container.currentHeight = compData.height_used;
+                        const caps = {
+                            weightRemaining: Math.min(
+                                compSpec.max_weight - compData.weight,
+                                hold.max_weight - holdRes.current_weight
+                            ),
+                            grossRemaining: maxGrossLimit - currentTotalGross,
+                            volumeRemaining: compSpec.max_volume - compData.volume
+                        };
+                        if (caps.weightRemaining <= 0 || caps.grossRemaining <= 0 || caps.volumeRemaining <= 0) break;
 
-                        // LOWER DECK WEIGHT LIMIT: Ground crew cannot manually lift > 75 kg per box
-                        if (item.weight > 75) continue;
+                        const tier = Packer.buildBestTier(container, targetItems, caps,
+                            (item) => passesHatch(item, hold) && item.weight <= LOWER_DECK_MAX_BOX_KG);
+                        if (!tier) break;
 
-                        let bestCompFit = null;
-                        for (let variant of item.getVariants()) {
-                            let itemHeight = variant.h;
-                            if (itemHeight > compSpec.max_height_cm) continue;
-                            
-                            let orientations = [
-                                { l: variant.l, w: variant.w },
-                                { l: variant.w, w: variant.l }
-                            ];
-                            
-                            for (let ori of orientations) {
-                                const effectiveFloorWidth = hold.min_floor_width_cm || hold.floor_width_cm;
-                                let rows = Math.floor(effectiveFloorWidth / ori.w);
-                                if (rows < 1) continue; // MUST FIT strictly inside floor width
-                                
-                                let maxLayers = Math.floor(compSpec.max_height_cm / itemHeight);
-                                let maxCols = Math.floor(compSpec.max_length_cm / ori.l);
-                                let maxGeo = maxCols * rows * maxLayers;
-                                
-                                if (maxGeo > 0) {
-                                    if (!bestCompFit || maxGeo > bestCompFit.maxGeo) {
-                                        bestCompFit = { maxGeo, h: itemHeight, l: ori.l, w: ori.w };
-                                    }
-                                }
-                            }
-                        }
-                        
-                        if (!bestCompFit) continue;
+                        for (const pl of tier.placements) pl.item.count -= 1;
 
-                        // Volume-based capacity check: how many items fit in remaining volume
-                        const remainingVolumeM3 = compSpec.max_volume - compData.volume;
-                        let remainingByVolume = item.volumeM3 > 0 ? Math.floor(remainingVolumeM3 / item.volumeM3) : bestCompFit.maxGeo;
+                        const contents = Packer.summariseTier(tier.placements);
+                        compData.tiers.push({
+                            z_start: compData.height_used,
+                            z_end: compData.height_used + tier.height,
+                            height: tier.height,
+                            count: tier.placements.length,
+                            total_weight: tier.placedWeight,
+                            placements: tier.placements.map(pl => ({
+                                name: pl.name, x: pl.x, y: pl.y, w: pl.w, l: pl.l, h: pl.h, weight: pl.weight
+                            })),
+                            contents
+                        });
 
-                        let toTake = Math.min(item.count, bestCompFit.maxGeo, remainingByVolume);
-                        let wTake = Math.floor((compSpec.max_weight - compData.weight) / item.weight);
-                        toTake = Math.min(toTake, wTake);
-                        let holdTake = Math.floor((hold.max_weight - holdRes.current_weight) / item.weight);
-                        toTake = Math.min(toTake, holdTake);
-                        let aircraftTake = Math.floor((maxGrossLimit - currentTotalGross) / item.weight);
-                        toTake = Math.min(toTake, aircraftTake);
+                        contents.forEach(c => {
+                            const existing = compData.items.find(i =>
+                                i.name === c.name && i.l === c.l && i.w === c.w && i.h === c.h);
+                            if (existing) existing.count += c.count;
+                            else compData.items.push({ name: c.name, count: c.count, l: c.l, w: c.w, h: c.h, weight: c.weight });
+                        });
 
-                        if (toTake > 0) {
-                            let existing = compData.items.find(i => i.name === item.name);
-                            if (existing) existing.count += toTake;
-                            else compData.items.push({ name: item.name, count: toTake, l: bestCompFit.l, h: bestCompFit.h, w: bestCompFit.w, weight: item.weight });
-
-                            compData.weight += toTake * item.weight;
-                            holdRes.current_weight += toTake * item.weight;
-                            currentTotalGross += toTake * item.weight;
-                            compData.volume += toTake * item.volumeM3;
-                            item.count -= toTake;
-                        }
+                        compData.height_used += tier.height;
+                        compData.weight += tier.placedWeight;
+                        holdRes.current_weight += tier.placedWeight;
+                        currentTotalGross += tier.placedWeight;
+                        compData.volume += tier.placedVolume;
                     }
                 }
             }
         };
 
-        // First pass: Fill pallets with MUST-MAIN items
+        // PASS 1 — items that can only ride on the main deck (too big for the
+        // hatch, or flagged Main Deck Only).
         packToPallets(mustMainItems);
 
-        // Second pass: Fill pallets with FLEXIBLE items (Main Deck is priority!)
-        packToPallets(flexibleItems);
-
-        // Third pass: Pack MUST-LOWER items into Lower Deck
+        // PASS 2 — items explicitly flagged Lower Deck Only.
         packToLowerDeck(mustLowerItems);
 
-        // Fourth pass: Pack remaining FLEXIBLE items into Lower Deck
+        // PASS 3 — fill the belly with the small, light cargo it exists for.
+        // The belly is loaded BEFORE the main deck: its volume is unusable by
+        // anything else, while every box left on a pallet costs main-deck stack
+        // height. Biggest eligible boxes go first so the holds fill densely.
+        const bellyCandidates = flexibleItems
+            .filter(i => i.count > 0 && bellyEligible(i))
+            .sort((a, b) => b.volumeM3 - a.volumeM3);
+        packToLowerDeck(bellyCandidates);
+
+        // PASS 4 — everything still outstanding goes onto the pallets.
+        packToPallets(flexibleItems);
+
+        // PASS 5 — anything the main deck could not take, retry in the belly
+        // (weight caps on a pallet may have blocked it earlier).
         packToLowerDeck(flexibleItems);
 
         return { pallets, lowerDeck: lowerDeckResults, leftovers: workingItems.filter(i => i.count > 0), aircraftId, maxGrossLimit };
@@ -587,8 +920,14 @@ const Packer = {
                 leftovers: result.leftovers.map(i => ({ name: i.name, count: i.count }))
             });
 
-            // If nothing was loaded this flight, we're stuck — break to avoid infinite loop
-            if (totalLoaded === 0) break;
+            // Nothing could be loaded — the rest is physically un-loadable. Drop this
+            // empty flight from the count; an aircraft that carries nothing is not
+            // a flight, and reporting one made the total misleading.
+            if (totalLoaded === 0) {
+                flightBreakdown.pop();
+                flightNum--;
+                break;
+            }
 
             // Advance remaining = only the leftovers after this flight
             remaining = result.leftovers
@@ -606,5 +945,5 @@ const Packer = {
 
 // export { Packer, CONFIG };
 if (typeof module !== 'undefined') {
-    module.exports = { Packer, CONFIG };
+    module.exports = { Packer, CONFIG, LOWER_DECK_MAX_BOX_KG };
 }

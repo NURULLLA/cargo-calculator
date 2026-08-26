@@ -76,12 +76,46 @@ class MainDeckViz {
             const baseMesh = new THREE.Mesh(baseGeom, baseMat);
             group.add(baseMesh);
 
+            // Palette so each box type in a mixed layer is distinguishable
+            const TYPE_COLORS = [0x0ea5e9, 0x10b981, 0xf59e0b, 0xef4444, 0x8b5cf6, 0x06b6d4, 0xec4899, 0x84cc16];
+
             // Layers
             p.layers.forEach(layer => {
                 const layerY = layer.z_start + (layer.height / 2);
 
-                // New logic utilizing packer.js dim_cross (Z) and dim_long (X)
-                // If dimensions are missing (old packer version), fallback to block
+                // Preferred path: the packer records the exact position of every
+                // box, so a layer holding several different box types renders
+                // truthfully instead of as one repeated grid.
+                if (layer.placements && layer.placements.length) {
+                    const typeIndex = new Map();
+                    (layer.contents || []).forEach((c, i) => typeIndex.set(c.name, i));
+
+                    const startZ = -(p.config.length_cross / 2);
+                    const startX = -(p.config.width_long / 2);
+
+                    layer.placements.forEach(pl => {
+                        const colorIdx = typeIndex.has(pl.name) ? typeIndex.get(pl.name) : 0;
+                        const geom = new THREE.BoxGeometry(
+                            Math.max(1, pl.l - 1), Math.max(1, pl.h - 1), Math.max(1, pl.w - 1));
+                        const mat = new THREE.MeshLambertMaterial({ color: TYPE_COLORS[colorIdx % TYPE_COLORS.length] });
+                        const mesh = new THREE.Mesh(geom, mat);
+                        mesh.add(new THREE.LineSegments(
+                            new THREE.EdgesGeometry(geom),
+                            new THREE.LineBasicMaterial({ color: 0x0c4a6e })));
+
+                        // pl.x runs across the fuselage (Z), pl.y runs along it (X);
+                        // both are the near corner, so shift by half the extent.
+                        mesh.position.set(
+                            startX + pl.y + pl.l / 2,
+                            layer.z_start + pl.h / 2 + 2.5,
+                            startZ + pl.x + pl.w / 2
+                        );
+                        group.add(mesh);
+                    });
+                    return;
+                }
+
+                // Fallback: older grid-based layer records
                 if (!layer.dim_cross || !layer.dim_long || !layer.meta || !layer.meta.main) {
                     const lGeom = new THREE.BoxGeometry(p.config.width_long * 0.95, layer.height, p.config.length_cross * 0.9);
                     const lMat = new THREE.MeshLambertMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.8 });

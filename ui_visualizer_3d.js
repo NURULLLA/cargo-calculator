@@ -152,6 +152,34 @@ class LowerDeckViz {
                 let rowMaxH = 0;
                 let sliceMaxL = 0;
 
+                // Preferred path: exact positions recorded by the packer.
+                if (resultComp.tiers && resultComp.tiers.length) {
+                    const TYPE_COLORS = ['#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16'];
+                    // One colour per box type across the whole compartment, matching
+                    // the manifest legend.
+                    const typeIndex = new Map();
+                    resultComp.tiers.forEach(t => (t.contents || []).forEach(c => {
+                        if (!typeIndex.has(c.name)) typeIndex.set(c.name, typeIndex.size);
+                    }));
+                    resultComp.tiers.forEach(tier => {
+                        tier.placements.forEach(pl => {
+                            // pl.x runs across the floor width (Z), pl.y along the
+                            // compartment (X); both measured from the near corner.
+                            if (pl.y + pl.l > geo.cargo_usable_length + 0.01) return;
+                            const box = this.createBox(pl.l, pl.h, pl.w,
+                                TYPE_COLORS[(typeIndex.get(pl.name) || 0) % TYPE_COLORS.length]);
+                            box.position.set(
+                                usableStart + pl.y + pl.l / 2,
+                                -(geo.h / 2) + tier.z_start + pl.h / 2,
+                                -(geo.w_floor / 2) + pl.x + pl.w / 2
+                            );
+                            group.add(box);
+                        });
+                    });
+                    this.scene.add(group);
+                    return;
+                }
+
                 resultComp.items.forEach(itemBatch => {
                     const bL = itemBatch.l || 50;
                     const bH = itemBatch.h || 50;
@@ -294,9 +322,9 @@ class LowerDeckViz {
         return mesh;
     }
 
-    createBox(l, h, w) {
+    createBox(l, h, w, color) {
         const geom = new THREE.BoxGeometry(l, h, w);
-        const mat = new THREE.MeshLambertMaterial({ color: 0x22c55e });
+        const mat = new THREE.MeshLambertMaterial({ color: color !== undefined ? new THREE.Color(color) : 0x22c55e });
         const mesh = new THREE.Mesh(geom, mat);
         // Position will be set by caller
 

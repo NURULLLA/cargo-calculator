@@ -314,6 +314,60 @@ class CargoApp {
         this.renderInventory();
     }
 
+    // Deck preference of a row: 'ANY' | 'MAIN' | 'LOWER'
+    deckOf(item) {
+        if (item.mainDeckOnly) return 'MAIN';
+        if (item.lowerDeckOnly) return 'LOWER';
+        return 'ANY';
+    }
+
+    setItemDeck(id, deck) {
+        const item = this.cargo.find(c => c.id === id);
+        if (!item) return;
+        // Clicking the deck a row is already on returns it to AUTO.
+        const next = this.deckOf(item) === deck ? 'ANY' : deck;
+        item.mainDeckOnly = next === 'MAIN';
+        item.lowerDeckOnly = next === 'LOWER';
+        this.renderInventory();
+    }
+
+    // ─── Bulk controls: with a 90-row manifest, per-row clicking is unusable ──
+    setAllTipping(allow) {
+        if (!this.cargo.length) return;
+        this.cargo.forEach(i => { i.allowTipping = allow; });
+        this.renderInventory();
+        this.showToast(allow ? 'Все грузы: поворот разрешён' : 'Все грузы: без поворота', 'info');
+    }
+
+    setAllDecks(deck) {
+        if (!this.cargo.length) return;
+        this.cargo.forEach(i => {
+            i.mainDeckOnly = deck === 'MAIN';
+            i.lowerDeckOnly = deck === 'LOWER';
+        });
+        this.renderInventory();
+        const label = deck === 'MAIN' ? 'MAIN DECK' : deck === 'LOWER' ? 'LOWER DECK' : 'AUTO';
+        this.showToast(`Все грузы: ${label}`, 'info');
+    }
+
+    clearInventory() {
+        if (!this.cargo.length) return;
+        if (!confirm(`Удалить все ${this.cargo.length} позиций из списка?`)) return;
+        this.cargo = [];
+        this.renderInventory();
+    }
+
+    _deckBtn(item, deck, label, icon, color) {
+        const on = this.deckOf(item) === deck;
+        const title = deck === 'MAIN'
+            ? 'Только верхняя палуба (паллеты). Нажать ещё раз — AUTO'
+            : 'Только нижняя палуба (багажники). Нажать ещё раз — AUTO';
+        return `<button class="row-chip deck-chip" data-id="${item.id}" data-deck="${deck}" title="${title}"
+            style="${on ? `background:${color};color:#fff;border-color:${color};` : ''}">
+            <i class="fas ${icon}"></i> ${label}
+        </button>`;
+    }
+
     renderInventory() {
         const tbody = document.querySelector('#inventory-table tbody');
         tbody.innerHTML = '';
@@ -321,19 +375,31 @@ class CargoApp {
         this.cargo.forEach(item => {
             const tr = document.createElement('tr');
             const totalWt = item.count * item.weight;
+            const tooHeavyForBelly = item.weight > 75;
+
             tr.innerHTML = `
                 <td>${item.priority ? '<i class="fas fa-star" style="color:#fbbf24;" title="Priority"></i> ' : ''}${item.name}</td>
                 <td>${item.length}x${item.width}x${item.height}</td>
                 <td>${item.weight} kg</td>
                 <td style="font-weight:bold; color:var(--accent);">${totalWt.toLocaleString()} kg</td>
                 <td>
-                    ${item.count} 
-                    ${item.noStack ? '<span class="badge" style="background:#ef4444; color:white; padding:2px 4px; border-radius:4px; font-size:0.7em;">Top Only</span>' : ''}
-                    ${item.mainDeckOnly ? '<span class="badge" style="background:#0ea5e9; color:white; padding:2px 4px; border-radius:4px; font-size:0.7em;">Main Deck Only</span>' : ''}
-                    ${item.lowerDeckOnly ? '<span class="badge" style="background:#8b5cf6; color:white; padding:2px 4px; border-radius:4px; font-size:0.7em;">Lower Deck Only</span>' : ''}
-                    <button class="badge tip-toggle-btn" data-id="${item.id}" style="cursor:pointer; border:none; ${item.allowTipping ? 'background:#10b981;' : 'background:#6b7280;'} color:white; padding:2px 4px; border-radius:4px; font-size:0.7em;" title="Click to toggle — ${item.allowTipping ? 'can be tipped/rotated' : 'must stay upright'}">
-                        <i class="fas ${item.allowTipping ? 'fa-rotate' : 'fa-up-long'}"></i> ${item.allowTipping ? 'Tip OK' : 'No Tip'}
-                    </button>
+                    <div class="qty-cell">
+                        <span class="qty-num">${item.count}</span>
+                        <div class="row-chips">
+                            ${item.noStack ? '<span class="row-chip chip-static" style="background:#ef4444;color:#fff;border-color:#ef4444;">Top Only</span>' : ''}
+                            <button class="row-chip tip-toggle-btn" data-id="${item.id}"
+                                title="${item.allowTipping ? 'Коробку можно поворачивать/класть на бок' : 'Коробка должна стоять строго вертикально'} — нажмите чтобы переключить"
+                                style="${item.allowTipping ? 'background:#10b981;color:#fff;border-color:#10b981;' : 'background:#6b7280;color:#fff;border-color:#6b7280;'}">
+                                <i class="fas ${item.allowTipping ? 'fa-rotate' : 'fa-up-long'}"></i> ${item.allowTipping ? 'Tip OK' : 'No Tip'}
+                            </button>
+                            ${this._deckBtn(item, 'MAIN', 'MAIN deck', 'fa-layer-group', '#0ea5e9')}
+                            ${this._deckBtn(item, 'LOWER', 'LOWER deck', 'fa-database', '#8b5cf6')}
+                            ${this.deckOf(item) === 'ANY' ? '<span class="row-chip chip-static chip-auto" title="Программа сама выберет палубу">AUTO</span>' : ''}
+                            ${this.deckOf(item) === 'LOWER' && tooHeavyForBelly
+                                ? '<span class="row-chip chip-static" style="background:#f59e0b;color:#111;border-color:#f59e0b;" title="Грузчики поднимают вручную не более 75 кг — этот груз в нижнюю палубу не пройдёт">&#9888; &gt;75 кг</span>'
+                                : ''}
+                        </div>
+                    </div>
                 </td>
                 <td>
                     <button class="btn-danger" data-id="${item.id}">
@@ -343,7 +409,67 @@ class CargoApp {
             `;
             tr.querySelector('.btn-danger').addEventListener('click', () => this.removeCargoItem(item.id));
             tr.querySelector('.tip-toggle-btn').addEventListener('click', () => this.toggleItemTipping(item.id));
+            tr.querySelectorAll('.deck-chip').forEach(btn => {
+                btn.addEventListener('click', () => this.setItemDeck(item.id, btn.dataset.deck));
+            });
             tbody.appendChild(tr);
+        });
+
+        this.renderInventoryToolbar();
+    }
+
+    // Toolbar above the inventory table: bulk tip / deck assignment + counters.
+    renderInventoryToolbar() {
+        const bar = document.getElementById('inventory-toolbar');
+        if (!bar) return;
+
+        if (!this.cargo.length) {
+            bar.innerHTML = '<span class="inv-empty">Список пуст — добавьте груз вручную или вставьте из Excel.</span>';
+            return;
+        }
+
+        const units = this.cargo.reduce((a, i) => a + i.count, 0);
+        const totalWt = this.cargo.reduce((a, i) => a + i.count * i.weight, 0);
+        const totalVol = this.cargo.reduce((a, i) => a + (i.length * i.width * i.height * i.count) / 1e6, 0);
+        const tipOk = this.cargo.filter(i => i.allowTipping).length;
+        const onMain = this.cargo.filter(i => i.mainDeckOnly).length;
+        const onLower = this.cargo.filter(i => i.lowerDeckOnly).length;
+
+        bar.innerHTML = `
+            <div class="inv-stats">
+                <span><strong>${this.cargo.length}</strong> позиций</span>
+                <span><strong>${units.toLocaleString()}</strong> мест</span>
+                <span><strong>${totalWt.toLocaleString()}</strong> кг</span>
+                <span><strong>${totalVol.toFixed(1)}</strong> м³</span>
+                <span class="inv-sep"></span>
+                <span>Tip OK: <strong>${tipOk}</strong>/${this.cargo.length}</span>
+                <span>MAIN: <strong>${onMain}</strong></span>
+                <span>LOWER: <strong>${onLower}</strong></span>
+                <span>AUTO: <strong>${this.cargo.length - onMain - onLower}</strong></span>
+            </div>
+            <div class="inv-actions">
+                <span class="inv-actions-label">Всем сразу:</span>
+                <button class="row-chip" data-act="tip-on"><i class="fas fa-rotate"></i> Tip OK</button>
+                <button class="row-chip" data-act="tip-off"><i class="fas fa-up-long"></i> No Tip</button>
+                <span class="inv-sep"></span>
+                <button class="row-chip" data-act="deck-main"><i class="fas fa-layer-group"></i> MAIN deck</button>
+                <button class="row-chip" data-act="deck-lower"><i class="fas fa-database"></i> LOWER deck</button>
+                <button class="row-chip" data-act="deck-any">AUTO</button>
+                <span class="inv-sep"></span>
+                <button class="row-chip chip-danger" data-act="clear"><i class="fas fa-trash"></i> Очистить</button>
+            </div>
+        `;
+
+        const acts = {
+            'tip-on': () => this.setAllTipping(true),
+            'tip-off': () => this.setAllTipping(false),
+            'deck-main': () => this.setAllDecks('MAIN'),
+            'deck-lower': () => this.setAllDecks('LOWER'),
+            'deck-any': () => this.setAllDecks('ANY'),
+            'clear': () => this.clearInventory()
+        };
+        bar.querySelectorAll('[data-act]').forEach(b => {
+            b.addEventListener('click', () => acts[b.dataset.act]());
         });
     }
 
@@ -381,7 +507,10 @@ class CargoApp {
         this.results.pallets.forEach(p => {
             totalGross += p.currentWeight;
             p.layers.forEach(l => {
-                if (l.dim_cross && l.dim_long && l.height && l.count) {
+                if (l.placements && l.placements.length) {
+                    // Mixed layers hold different box sizes — sum them individually
+                    l.placements.forEach(pl => { totalVolume += (pl.w * pl.l * pl.h) / 1000000; });
+                } else if (l.dim_cross && l.dim_long && l.height && l.count) {
                     totalVolume += (l.dim_cross * l.dim_long * l.height * l.count) / 1000000;
                 }
             });
@@ -452,9 +581,22 @@ class CargoApp {
                 const div = document.createElement('div');
                 div.className = 'leftover-item';
                 div.style.cssText = 'padding:0.4rem 0.2rem; border-bottom:1px solid var(--border); font-size:0.85rem;';
-                const reason = item.lowerDeckOnly ? 'LowerDeckOnly — too large for any hold door'
-                    : item.weight > 75 ? 'Lower Deck Only — exceeds 75 kg manual handling limit'
-                    : 'Could not fit (Limit or Space)';
+                const dims = item.originalDims || [item.length, item.width, item.height];
+                const sorted = [...dims].sort((a, b) => a - b);
+                let reason;
+                if (item.lowerDeckOnly && item.weight > 75) {
+                    reason = 'Lower Deck Only, но вес > 75 кг — грузчики не поднимут вручную';
+                } else if (item.lowerDeckOnly && (sorted[0] > 108 || sorted[1] > 140)) {
+                    reason = 'Lower Deck Only — не проходит в люк багажника (140×112 см)';
+                } else if (item.lowerDeckOnly) {
+                    reason = 'Lower Deck Only — в багажниках закончилось место';
+                } else if (item.mainDeckOnly) {
+                    reason = 'Main Deck Only — на паллетах закончилось место или лимит веса';
+                } else if (sorted[2] > 205) {
+                    reason = `Слишком высокий (${sorted[2]} см > 205 см) для любой палубы`;
+                } else {
+                    reason = 'Не поместилось — нужен следующий рейс (см. Flights Required)';
+                }
                 div.innerHTML = `<strong>${item.name}</strong>: <span style="color:var(--danger)">${item.count} units</span> — <span style="color:var(--text-muted)">${reason}</span>`;
                 leftoverList.appendChild(div);
             });
@@ -533,7 +675,8 @@ class CargoApp {
         html += `</tbody></table>`;
 
         if (!fp.allCleared) {
-            const stuck = fp.flightBreakdown[fp.flightBreakdown.length - 1]?.leftovers || [];
+            const stuck = (fp.flightBreakdown[fp.flightBreakdown.length - 1]?.leftovers || [])
+                .filter(i => i.count > 0);
             if (stuck.length > 0) {
                 html += `<div style="margin-top:0.75rem; padding:0.5rem; background:#f59e0b11; border:1px solid #f59e0b44; border-radius:6px; font-size:0.8rem; color:#f59e0b;">
                     <strong>⚠ Cannot be loaded (physical constraints):</strong><br>
@@ -763,8 +906,16 @@ class CargoApp {
         return `<div class="mf-svg-wrap"><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="max-width:100%">${grid}${rects}</svg></div>`;
     }
 
+    // Palette shared by the layer SVG, the layer legend and the 3D view
+    static TYPE_PALETTE = ['#0ea5e9','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#84cc16'];
+
     // ─── SVG: вид сверху одного слоя ─────────────────────────────
     _renderTopViewSVG(layer, config, color) {
+        // Mixed layers carry the exact position of every box — draw those.
+        if (layer.placements && layer.placements.length) {
+            return this._renderPlacementsSVG(layer, config);
+        }
+
         const SW = 340, SH = 210, PAD = 2, LH = 22, dH = SH - LH;
         const sX = (SW-PAD*2) / config.length_cross, sY = (dH-PAD*2) / config.width_long;
         const dC = layer.dim_cross || 100, dL = layer.dim_long || 80;
@@ -800,12 +951,98 @@ class CargoApp {
         return `<div class="mf-svg-wrap"><svg width="${SW}" height="${SH}" viewBox="0 0 ${SW} ${SH}" style="max-width:100%">${outline}${boxes}${ax}${leg}</svg></div>`;
     }
 
+    // ─── SVG: реальная раскладка слоя (вид сверху) ───────────────
+    _renderPlacementsSVG(layer, config) {
+        const SW = 340, SH = 232, PAD = 2, LH = 44, dH = SH - LH;
+        const sX = (SW - PAD * 2) / config.length_cross;   // across the fuselage
+        const sY = (dH - PAD * 2) / config.width_long;     // along the fuselage
+        const palette = CargoApp.TYPE_PALETTE;
+
+        const typeIndex = new Map();
+        (layer.contents || []).forEach((c, i) => typeIndex.set(c.name, i));
+
+        let boxes = '';
+        layer.placements.forEach((pl, i) => {
+            const col = palette[(typeIndex.has(pl.name) ? typeIndex.get(pl.name) : i) % palette.length];
+            const bx = PAD + pl.x * sX, by = PAD + pl.y * sY;
+            const bw = Math.max(2, pl.w * sX - 1.5), bh = Math.max(2, pl.l * sY - 1.5);
+            boxes += `<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="${col}" opacity="0.85" rx="2" stroke="white" stroke-width="0.5"><title>${pl.name} — ${pl.w}&times;${pl.l}&times;${pl.h} см, ${pl.weight} кг</title></rect>`;
+            if (bw > 26 && bh > 20) {
+                boxes += `<text x="${(bx + bw / 2).toFixed(1)}" y="${(by + bh / 2 + 4).toFixed(1)}" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.95)" font-weight="bold">${i + 1}</text>`;
+            }
+        });
+
+        // Usable width at the top of this layer — the fuselage narrows with height
+        let taper = '';
+        if (layer.avail_cross && layer.avail_cross < config.length_cross - 0.5) {
+            const off = ((config.length_cross - layer.avail_cross) / 2) * sX;
+            taper = `<rect x="${(PAD + off).toFixed(1)}" y="${PAD}" width="${(layer.avail_cross * sX).toFixed(1)}" height="${(dH - PAD * 2).toFixed(1)}" fill="none" stroke="#f59e0b" stroke-width="1" stroke-dasharray="4,3" opacity="0.8"/>`;
+        }
+
+        const outline = `<rect x="1" y="1" width="${SW - 2}" height="${dH - 2}" fill="none" stroke="#475569" stroke-width="1.5" rx="3" stroke-dasharray="5,3"/>`;
+        const ax = `<text x="${SW / 2}" y="${dH + 12}" text-anchor="middle" font-size="8" fill="#64748b">&larr; ПОПЕРЁК ФЮЗЕЛЯЖА (${config.length_cross}см) &rarr;${layer.avail_cross && layer.avail_cross < config.length_cross - 0.5 ? ` &bull; <tspan fill="#f59e0b">полезно ${Math.round(layer.avail_cross)}см</tspan>` : ''}</text>`;
+
+        // Legend: one swatch per box type in this layer
+        let legend = '';
+        (layer.contents || []).slice(0, 6).forEach((c, i) => {
+            const lx = 4 + (i % 3) * 112, ly = dH + 18 + Math.floor(i / 3) * 12;
+            legend += `<rect x="${lx}" y="${ly}" width="8" height="8" fill="${palette[i % palette.length]}" rx="1"/>`
+                + `<text x="${lx + 12}" y="${ly + 7}" font-size="7.5" fill="#94a3b8">${String(c.name).slice(0, 14)} &times;${c.count}</text>`;
+        });
+
+        return `<div class="mf-svg-wrap"><svg width="${SW}" height="${SH}" viewBox="0 0 ${SW} ${SH}" style="max-width:100%">${outline}${boxes}${taper}${ax}${legend}</svg></div>`;
+    }
+
     // ─── Карточка одного слоя ─────────────────────────────────────
     _renderLayerCard(layer, idx, config) {
         const C = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899'];
         const col = C[idx % C.length];
         const dC = layer.dim_cross||'?', dL = layer.dim_long||'?';
         const mC = layer.meta?.main?.c||0, mR = layer.meta?.main?.r||0, side = layer.meta?.side;
+        const contents = layer.contents || [];
+        const palette = CargoApp.TYPE_PALETTE;
+        const layerWeight = layer.total_weight != null ? layer.total_weight : layer.count * (layer.weight || 0);
+
+        // A layer may hold several box types side by side. In that case the
+        // per-type table replaces the single-box grid instructions.
+        if (contents.length > 1) {
+            const rows = `<tr><td style="color:#64748b">Коробка</td><td style="color:#64748b">Кол-во &mdash; поперёк&times;вдоль&times;выс, вес</td></tr>`
+                + contents.map((c, i) => `
+                <tr>
+                    <td><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${palette[i % palette.length]};margin-right:6px;"></span>${c.name}</td>
+                    <td><strong>${c.count} шт.</strong> &mdash; ${c.w}&times;${c.l}&times;${c.h}см, ${(c.count * c.weight).toLocaleString()} кг</td>
+                </tr>`).join('');
+            return `
+            <div class="mf-layer-card" style="border-left:4px solid ${col}">
+                <div class="mf-layer-header">
+                    <div class="mf-layer-num" style="background:${col}20;color:${col};border:1px solid ${col}40">СЛОЙ ${idx+1}</div>
+                    <div class="mf-layer-meta">
+                        <span class="mf-badge-sm" style="background:#1e3a5f;color:#7dd3fc">&#128230; ${layer.count} кор.</span>
+                        <span class="mf-badge-sm" style="background:#14362e;color:#6ee7b7">&#9878; ${layerWeight.toLocaleString()} кг</span>
+                        <span class="mf-badge-sm" style="background:#2d1f3d;color:#c4b5fd">${layer.z_start}&ndash;${layer.z_end}см</span>
+                        <span class="mf-badge-sm" style="background:#332b00;color:#fcd34d">Выс: ${layer.height}см</span>
+                        <span class="mf-badge-sm" style="background:#3d1f1f;color:#fca5a5">Смешанный: ${contents.length} типа</span>
+                    </div>
+                </div>
+                <div class="mf-layer-body">
+                    <div class="mf-topview-wrap">
+                        <div class="mf-topview-ylabel"><span>&uarr;</span><span style="writing-mode:vertical-rl;transform:rotate(180deg);font-size:9px;color:#64748b">ВДОЛЬ</span><span>&darr;</span></div>
+                        ${this._renderTopViewSVG(layer, config, col)}
+                    </div>
+                    <div class="mf-instructions">
+                        <div class="mf-instr-callout">
+                            <div class="mf-instr-callout-icon">&#129513;</div>
+                            <div>
+                                <div class="mf-instr-callout-title">СМЕШАННЫЙ СЛОЙ</div>
+                                <p style="margin:0.3rem 0 0;line-height:1.5">В этом слое стоят рядом коробки разных типов. Ставьте их по схеме слева &mdash; номер на схеме соответствует порядку укладки, цвет &mdash; типу коробки.</p>
+                            </div>
+                        </div>
+                        <table class="mf-spec-table">${rows}</table>
+                    </div>
+                </div>
+            </div>`;
+        }
+
         const instr = layer.orient_type === 'A'
             ? `Класть коробку <strong style="color:#f59e0b">длинной стороной (${dC}см) ПОПЕРЁК самолёта</strong> &mdash; длина уходит влево-вправо.`
             : `Класть коробку <strong style="color:#f59e0b">короткой стороной (${dC}см) ПОПЕРЁК самолёта</strong>, длинная сторона (${dL}см) идёт вдоль нос-хвост.`;
@@ -815,7 +1052,7 @@ class CargoApp {
                 <div class="mf-layer-num" style="background:${col}20;color:${col};border:1px solid ${col}40">СЛОЙ ${idx+1}</div>
                 <div class="mf-layer-meta">
                     <span class="mf-badge-sm" style="background:#1e3a5f;color:#7dd3fc">&#128230; ${layer.count} кор.</span>
-                    <span class="mf-badge-sm" style="background:#14362e;color:#6ee7b7">&#9878; ${(layer.count*(layer.weight||0)).toLocaleString()} кг</span>
+                    <span class="mf-badge-sm" style="background:#14362e;color:#6ee7b7">&#9878; ${layerWeight.toLocaleString()} кг</span>
                     <span class="mf-badge-sm" style="background:#2d1f3d;color:#c4b5fd">${layer.z_start}&ndash;${layer.z_end}см</span>
                     <span class="mf-badge-sm" style="background:#332b00;color:#fcd34d">Выс: ${layer.height}см</span>
                 </div>
@@ -836,8 +1073,9 @@ class CargoApp {
                     <table class="mf-spec-table">
                         <tr><td>Название</td><td><strong>${layer.box_name||'—'}</strong></td></tr>
                         <tr><td>Размер (попер&times;вдоль&times;выс)</td><td><strong>${dC}&times;${dL}&times;${layer.height}см</strong></td></tr>
-                        <tr><td>Колонны поперёк</td><td>${mC} шт. &times; ${dC}см = <strong>${(mC * +dC).toFixed(0)}см</strong></td></tr>
-                        <tr><td>Ряды вдоль</td><td>${mR} шт. &times; ${dL}см = <strong>${(mR * +dL).toFixed(0)}см</strong></td></tr>
+                        <tr><td>Количество в слое</td><td><strong>${layer.count} шт.</strong></td></tr>
+                        ${mC && mR ? `<tr><td>Колонны поперёк</td><td>${mC} шт. &times; ${dC}см = <strong>${(mC * +dC).toFixed(0)}см</strong></td></tr>
+                        <tr><td>Ряды вдоль</td><td>${mR} шт. &times; ${dL}см = <strong>${(mR * +dL).toFixed(0)}см</strong></td></tr>` : ''}
                         ${side?`<tr class="mf-side-row"><td>+ Повёрнутые 90&deg;</td><td>${side.count} шт. &mdash; <span style="color:#f59e0b">жёлтые на схеме</span></td></tr>`:''}
                     </table>
                     ${side?`<div class="mf-side-note">&#9888; Жёлтые коробки повёрнуты: ${dL}см поперёк, ${dC}см вдоль.</div>`:''}
@@ -848,6 +1086,8 @@ class CargoApp {
 
     // ─── SVG: нижняя палуба вид сверху ───────────────────────────
     _renderLowerDeckTopView(comp, hold) {
+        // The packer records the exact position of every box in every tier.
+        if (comp.tiers && comp.tiers.length) return this._renderLowerDeckTiers(comp, hold);
         const W=460, H=170, PAD=4, LAB=28, cL=comp.max_length_cm, cW=hold.floor_width_cm||120;
         const sX=(W-LAB-PAD*2)/cL, sY=(H-PAD*2-20)/cW, oX=LAB+PAD, oY=PAD;
         const cw=cL*sX, ch=cW*sY;
@@ -875,6 +1115,57 @@ class CargoApp {
         c += `<text x="${(oX+cw/2).toFixed(1)}" y="${H-3}" text-anchor="middle" font-size="8" fill="#64748b">Длина: ${cL}см</text>`;
         c += `<text x="${(LAB/2).toFixed(1)}" y="${(oY+ch/2).toFixed(1)}" text-anchor="middle" font-size="8" fill="#64748b" transform="rotate(-90,${LAB/2},${oY+ch/2})">Шир: ${cW}см</text>`;
         return `<div class="mf-svg-wrap"><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="max-width:100%">${c}</svg></div>`;
+    }
+
+    // ─── SVG: реальная раскладка отсека, по ярусам ───────────────
+    _renderLowerDeckTiers(comp, hold) {
+        const palette = CargoApp.TYPE_PALETTE;
+        const cL = comp.max_length_cm;
+        const cW = comp.floor_width_cm || hold.floor_width_cm || 120;
+        const W = 460, LAB = 30, PAD = 4;
+        const sX = (W - LAB - PAD * 2) / cL;
+        const sY = Math.min(sX, 70 / cW);
+        const tierH = cW * sY + 26;
+
+        // One colour per box type across the whole compartment, so a box keeps
+        // its colour between tiers and matches the legend.
+        const compTypeIndex = new Map();
+        comp.tiers.forEach(t => (t.contents || []).forEach(c => {
+            if (!compTypeIndex.has(c.name)) compTypeIndex.set(c.name, compTypeIndex.size);
+        }));
+
+        let svg = '', y0 = 0;
+        comp.tiers.forEach((tier, ti) => {
+            const oX = LAB + PAD, oY = y0 + 16;
+            svg += `<text x="2" y="${y0 + 11}" font-size="8.5" fill="#94a3b8" font-weight="bold">ЯРУС ${ti + 1} &bull; ${tier.z_start}&ndash;${tier.z_end}см &bull; ${tier.count} кор. &bull; ${Math.round(tier.total_weight)} кг</text>`;
+            svg += `<rect x="${oX}" y="${oY}" width="${(cL * sX).toFixed(1)}" height="${(cW * sY).toFixed(1)}" fill="#0f172a" stroke="#334155" stroke-width="1.2" rx="2"/>`;
+
+            tier.placements.forEach(pl => {
+                const col = palette[compTypeIndex.get(pl.name) % palette.length];
+                // pl.y runs along the compartment, pl.x across the floor width
+                const bx = oX + pl.y * sX, by = oY + pl.x * sY;
+                const bw = Math.max(1.5, pl.l * sX - 1), bh = Math.max(1.5, pl.w * sY - 1);
+                svg += `<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="${col}" opacity="0.85" rx="1.5"><title>${pl.name} — ${pl.l}&times;${pl.w}&times;${pl.h} см, ${pl.weight} кг</title></rect>`;
+            });
+
+            // Hatch marker at the loading end
+            svg += `<rect x="${oX}" y="${oY}" width="4" height="${(cW * sY).toFixed(1)}" fill="#22c55e" opacity="0.7" rx="1"/>`;
+            y0 += tierH;
+        });
+
+        svg += `<text x="${LAB + PAD}" y="${y0 + 9}" font-size="8" fill="#64748b">Длина отсека: ${cL}см &bull; ширина пола: ${cW}см &bull; высота: ${comp.max_height_cm}см &bull; занято по высоте: ${comp.height_used}см</text>`;
+
+        // Legend — one swatch per box type in the compartment
+        const names = [];
+        comp.tiers.forEach(t => (t.contents || []).forEach(c => { if (!names.includes(c.name)) names.push(c.name); }));
+        names.slice(0, 9).forEach((n, i) => {
+            const lx = 4 + (i % 3) * 150, ly = y0 + 18 + Math.floor(i / 3) * 11;
+            svg += `<rect x="${lx}" y="${ly}" width="8" height="8" fill="${palette[i % palette.length]}" rx="1"/>`
+                + `<text x="${lx + 12}" y="${ly + 7}" font-size="7.5" fill="#94a3b8">${String(n).slice(0, 20)}</text>`;
+        });
+
+        const H = y0 + 22 + Math.ceil(Math.min(names.length, 9) / 3) * 11;
+        return `<div class="mf-svg-wrap"><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="max-width:100%">${svg}</svg></div>`;
     }
 
     // ─── Карточка предмета нижней палубы ─────────────────────────
@@ -932,6 +1223,8 @@ class CargoApp {
             length: findCol(['l cm', 'd cm', 'length', 'l (cm)', 'l']),
             width:  findCol(['w cm', 'width', 'w (cm)', 'w']),
             height: findCol(['h cm', 'height', 'h (cm)', 'h']),
+            tip:    findCol(['allow tipping', 'tipping', 'tip', 'rotate']),
+            deck:   findCol(['deck', 'main deck', 'lower deck']),
         };
 
         const parseNum = (v) => { if (v === undefined || v === null) return NaN; return parseFloat(String(v).replace(/[^\d.\-]/g, '')); };
@@ -959,6 +1252,20 @@ class CargoApp {
                 if (dims) { l = dims.l; w = dims.w; h = dims.h; }
             }
             if (!name || isNaN(qty) || qty <= 0) continue;
+
+            // Optional columns. Tipping is ALLOWED unless the sheet says otherwise.
+            let allowTipping = true;
+            if (cols.tip >= 0) {
+                const t = String(row[cols.tip] || '').trim().toLowerCase();
+                if (['no', 'n', 'false', '0', 'нет', 'no tip'].includes(t)) allowTipping = false;
+            }
+            let deck = 'ANY';
+            if (cols.deck >= 0) {
+                const d = String(row[cols.deck] || '').trim().toLowerCase();
+                if (d.startsWith('main') || d === 'md' || d.startsWith('верх')) deck = 'MAIN';
+                else if (d.startsWith('lower') || d === 'ld' || d.startsWith('ниж')) deck = 'LOWER';
+            }
+
             results.push({
                 name: name.trim(),
                 qty: Math.round(qty),
@@ -966,6 +1273,8 @@ class CargoApp {
                 l: isNaN(l) ? 60 : l,
                 w: isNaN(w) ? 40 : w,
                 h: isNaN(h) ? 40 : h,
+                allowTipping,
+                deck,
             });
         }
         return results;
@@ -982,22 +1291,29 @@ class CargoApp {
             + (items.length > 3 ? ` и ещё ${items.length - 3}...` : '');
     }
 
+    // Returns how many rows were added — init() relies on this to close the modal.
     importPastedExcel() {
         const text = document.getElementById('paste-area').value;
         const items = this._parsePasteText(text);
-        if (!items.length) { this.showToast('Не удалось разобрать данные из буфера.', 'error'); return; }
+        if (!items.length) { this.showToast('Не удалось разобрать данные из буфера.', 'error'); return 0; }
         items.forEach(item => {
             this.cargo.push({
                 id: Date.now() + Math.random(),
                 name: item.name,
                 length: item.l, width: item.w, height: item.h,
                 weight: item.weight, count: item.qty,
-                allowTipping: false, noStack: false, priority: false,
-                mainDeckOnly: false, lowerDeckOnly: false
+                // Imported cargo defaults to tipping ALLOWED — the same default as
+                // the manual form. Forcing "No Tip" on import locked every box to a
+                // single orientation and cost a large amount of usable volume.
+                allowTipping: item.allowTipping !== false,
+                noStack: false, priority: false,
+                mainDeckOnly: item.deck === 'MAIN',
+                lowerDeckOnly: item.deck === 'LOWER'
             });
         });
         this.renderInventory();
         this.showToast(`Добавлено ${items.length} позиций из Excel`, 'success');
+        return items.length;
     }
 
     handleExcelImport(e) {
@@ -1023,8 +1339,10 @@ class CargoApp {
                         name: item.name,
                         length: item.l, width: item.w, height: item.h,
                         weight: item.weight, count: item.qty,
-                        allowTipping: false, noStack: false, priority: false,
-                        mainDeckOnly: false, lowerDeckOnly: false
+                        allowTipping: item.allowTipping !== false,
+                        noStack: false, priority: false,
+                        mainDeckOnly: item.deck === 'MAIN',
+                        lowerDeckOnly: item.deck === 'LOWER'
                     });
                 });
                 this.renderInventory();

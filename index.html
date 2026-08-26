@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=4.0">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/three@0.145.0/build/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.145.0/examples/js/controls/OrbitControls.js"></script>
@@ -135,6 +135,7 @@
 
                     <div class="card inventory-card">
                         <h3>Current Inventory</h3>
+                        <div id="inventory-toolbar" class="inventory-toolbar"></div>
                         <div class="table-container">
                             <table id="inventory-table">
                                 <thead>
@@ -264,6 +265,9 @@
                 <span style="background:#1e3a5f;padding:2px 6px;border-radius:4px;margin:2px;">Qty / Cartons</span>
                 <span style="background:#1e3a5f;padding:2px 6px;border-radius:4px;margin:2px;">Weight (kg)</span>
                 <span style="background:#1e3a5f;padding:2px 6px;border-radius:4px;margin:2px;">Size / L x W x H</span>
+                <span style="background:#1e3a5f;padding:2px 6px;border-radius:4px;margin:2px;">Tipping</span>
+                <span style="background:#1e3a5f;padding:2px 6px;border-radius:4px;margin:2px;">Deck</span>
+                <br><span style="opacity:0.75;">После вставки в списке можно переключить <strong>Tip OK / No Tip</strong> и <strong>MAIN deck / LOWER deck</strong> для каждой строки — или для всех сразу кнопками над таблицей.</span>
             </div>
 
             <textarea id="paste-area" placeholder="Вставьте сюда скопированные ячейки из Excel (Ctrl+V)..."
@@ -285,10 +289,10 @@
         </div>
     </div>
 
-    <script src="packer.js?v=3.7"></script>
-    <script src="ui_visualizer_main.js?v=3.7"></script>
-    <script src="ui_visualizer_3d.js?v=3.7"></script>
-    <script src="app.js?v=3.7"></script>
+    <script src="packer.js?v=4.0"></script>
+    <script src="ui_visualizer_main.js?v=4.0"></script>
+    <script src="ui_visualizer_3d.js?v=4.0"></script>
+    <script src="app.js?v=4.0"></script>
 </body>
 
 </html>

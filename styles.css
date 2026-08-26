@@ -1004,3 +1004,55 @@ tr:hover td {
 .mf-comp-card { background:#1e293b; border-radius:8px; padding:0.75rem 0.9rem; }
 .mf-comp-card-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:0.3rem; }
 .mf-footer-note { padding:0.75rem 1.3rem; font-size:0.76rem; color:#94a3b8; background:#0a1628; border-top:1px solid #1e293b; line-height:1.6; }
+
+/* ═══════════════════════════════════════════════════════════════
+   INVENTORY — per-row chips (Tip / MAIN deck / LOWER deck) and the
+   bulk-action toolbar above the table.
+   ═══════════════════════════════════════════════════════════════ */
+.inventory-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem 1rem;
+    padding: 0.6rem 0.75rem;
+    margin-bottom: 0.75rem;
+    background: rgba(56, 189, 248, 0.05);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+.inv-empty { font-size: 0.82rem; color: var(--text-muted); }
+.inv-stats,
+.inv-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.75rem; }
+.inv-stats { font-size: 0.8rem; color: var(--text-muted); }
+.inv-stats strong { color: var(--text); font-weight: 700; }
+.inv-actions-label { font-size: 0.78rem; color: var(--text-muted); margin-right: 0.1rem; }
+.inv-sep { width: 1px; height: 16px; background: var(--border); display: inline-block; }
+
+.row-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 600;
+    line-height: 1.4;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.1s;
+}
+.row-chip:hover { color: var(--text); border-color: var(--accent); transform: translateY(-1px); }
+.row-chip:active { transform: translateY(0); }
+.row-chip i { font-size: 0.72em; }
+.row-chip.chip-static { cursor: default; }
+.row-chip.chip-static:hover { transform: none; border-color: var(--border); }
+.chip-auto { color: var(--text-muted); opacity: 0.75; }
+.chip-danger:hover { color: #fff; background: #ef4444; border-color: #ef4444; }
+
+.qty-cell { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.qty-num { font-weight: 700; min-width: 1.6em; }
+.row-chips { display: flex; flex-wrap: wrap; gap: 4px; }
