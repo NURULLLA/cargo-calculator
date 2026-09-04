@@ -314,6 +314,13 @@ class CargoApp {
         this.renderInventory();
     }
 
+    toggleItemNoStack(id) {
+        const item = this.cargo.find(c => c.id === id);
+        if (!item) return;
+        item.noStack = !item.noStack;
+        this.renderInventory();
+    }
+
     // Deck preference of a row: 'ANY' | 'MAIN' | 'LOWER'
     deckOf(item) {
         if (item.mainDeckOnly) return 'MAIN';
@@ -337,6 +344,13 @@ class CargoApp {
         this.cargo.forEach(i => { i.allowTipping = allow; });
         this.renderInventory();
         this.showToast(allow ? 'Все грузы: поворот разрешён' : 'Все грузы: без поворота', 'info');
+    }
+
+    setAllNoStack(noStack) {
+        if (!this.cargo.length) return;
+        this.cargo.forEach(i => { i.noStack = noStack; });
+        this.renderInventory();
+        this.showToast(noStack ? 'Все грузы: не штабелировать' : 'Все грузы: штабелировать можно', 'info');
     }
 
     setAllDecks(deck) {
@@ -386,7 +400,11 @@ class CargoApp {
                     <div class="qty-cell">
                         <span class="qty-num">${item.count}</span>
                         <div class="row-chips">
-                            ${item.noStack ? '<span class="row-chip chip-static" style="background:#ef4444;color:#fff;border-color:#ef4444;">Top Only</span>' : ''}
+                            <button class="row-chip stack-toggle-btn" data-id="${item.id}"
+                                title="${item.noStack ? 'Сверху ничего ставить нельзя — только один слой' : 'На этот груз можно ставить другие сверху'} — нажмите чтобы переключить"
+                                style="${item.noStack ? 'background:#ef4444;color:#fff;border-color:#ef4444;' : 'background:#374151;color:#fff;border-color:#374151;'}">
+                                <i class="fas ${item.noStack ? 'fa-ban' : 'fa-layer-group'}"></i> ${item.noStack ? 'No Stack' : 'Stack OK'}
+                            </button>
                             <button class="row-chip tip-toggle-btn" data-id="${item.id}"
                                 title="${item.allowTipping ? 'Коробку можно поворачивать/класть на бок' : 'Коробка должна стоять строго вертикально'} — нажмите чтобы переключить"
                                 style="${item.allowTipping ? 'background:#10b981;color:#fff;border-color:#10b981;' : 'background:#6b7280;color:#fff;border-color:#6b7280;'}">
@@ -409,6 +427,7 @@ class CargoApp {
             `;
             tr.querySelector('.btn-danger').addEventListener('click', () => this.removeCargoItem(item.id));
             tr.querySelector('.tip-toggle-btn').addEventListener('click', () => this.toggleItemTipping(item.id));
+            tr.querySelector('.stack-toggle-btn').addEventListener('click', () => this.toggleItemNoStack(item.id));
             tr.querySelectorAll('.deck-chip').forEach(btn => {
                 btn.addEventListener('click', () => this.setItemDeck(item.id, btn.dataset.deck));
             });
@@ -432,6 +451,7 @@ class CargoApp {
         const totalWt = this.cargo.reduce((a, i) => a + i.count * i.weight, 0);
         const totalVol = this.cargo.reduce((a, i) => a + (i.length * i.width * i.height * i.count) / 1e6, 0);
         const tipOk = this.cargo.filter(i => i.allowTipping).length;
+        const noStack = this.cargo.filter(i => i.noStack).length;
         const onMain = this.cargo.filter(i => i.mainDeckOnly).length;
         const onLower = this.cargo.filter(i => i.lowerDeckOnly).length;
 
@@ -443,6 +463,7 @@ class CargoApp {
                 <span><strong>${totalVol.toFixed(1)}</strong> м³</span>
                 <span class="inv-sep"></span>
                 <span>Tip OK: <strong>${tipOk}</strong>/${this.cargo.length}</span>
+                <span>No Stack: <strong>${noStack}</strong>/${this.cargo.length}</span>
                 <span>MAIN: <strong>${onMain}</strong></span>
                 <span>LOWER: <strong>${onLower}</strong></span>
                 <span>AUTO: <strong>${this.cargo.length - onMain - onLower}</strong></span>
@@ -451,6 +472,9 @@ class CargoApp {
                 <span class="inv-actions-label">Всем сразу:</span>
                 <button class="row-chip" data-act="tip-on"><i class="fas fa-rotate"></i> Tip OK</button>
                 <button class="row-chip" data-act="tip-off"><i class="fas fa-up-long"></i> No Tip</button>
+                <span class="inv-sep"></span>
+                <button class="row-chip" data-act="stack-on"><i class="fas fa-layer-group"></i> Stack OK</button>
+                <button class="row-chip" data-act="stack-off"><i class="fas fa-ban"></i> No Stack</button>
                 <span class="inv-sep"></span>
                 <button class="row-chip" data-act="deck-main"><i class="fas fa-layer-group"></i> MAIN deck</button>
                 <button class="row-chip" data-act="deck-lower"><i class="fas fa-database"></i> LOWER deck</button>
@@ -463,6 +487,8 @@ class CargoApp {
         const acts = {
             'tip-on': () => this.setAllTipping(true),
             'tip-off': () => this.setAllTipping(false),
+            'stack-on': () => this.setAllNoStack(false),
+            'stack-off': () => this.setAllNoStack(true),
             'deck-main': () => this.setAllDecks('MAIN'),
             'deck-lower': () => this.setAllDecks('LOWER'),
             'deck-any': () => this.setAllDecks('ANY'),
