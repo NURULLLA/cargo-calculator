@@ -1393,7 +1393,7 @@ class CargoApp {
     }
 }
 
-const BUILD_VERSION = '4.0';
+const BUILD_VERSION = '4.1';
 console.log(`SkyGuard Cargo Optimizer — build ${BUILD_VERSION}`);
 
 window.app = new CargoApp();
