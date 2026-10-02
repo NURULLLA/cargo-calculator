@@ -504,10 +504,19 @@ class CargoApp {
 
         const configCode = document.getElementById('config-select').value;
         const aircraftId = document.getElementById('aircraft-select').value;
+        const euroPallets = document.getElementById('use-euro-pallets')?.checked || false;
+        const opts = { aircraftId, euroPallets };
         try {
-            this.results = Packer.packAircraft(configCode, this.cargo, { aircraftId });
+            this.results = Packer.packAircraft(configCode, this.cargo, opts);
             // Calculate total flights needed for all cargo
-            this.flightPlan = Packer.calculateTotalFlights(configCode, this.cargo, { aircraftId });
+            this.flightPlan = Packer.calculateTotalFlights(configCode, this.cargo, opts);
+            // Евро-паллеты дают площадь, но забирают 15 см высоты — на высоком грузе
+            // это бывает в минус. Считаем противоположный вариант, чтобы подсказать.
+            const altRes = Packer.packAircraft(configCode, this.cargo, { aircraftId, euroPallets: !euroPallets });
+            const loadedBoxes = (r) => r.pallets.reduce((a, p) => a + p.layers.reduce((x, l) => x + (l.count || 0), 0), 0)
+                + r.lowerDeck.reduce((a, h) => a + h.compartments.reduce((x, c) =>
+                    x + c.items.reduce((y, i) => y + i.count, 0), 0), 0);
+            this.euroCompare = { euroOn: euroPallets, current: loadedBoxes(this.results), alternative: loadedBoxes(altRes) };
         } catch (e) {
             console.error("Packer Error:", e);
             alert("Calculation Error: " + e.message);
@@ -525,8 +534,10 @@ class CargoApp {
         const totalW = this.results.pallets.reduce((acc, p) => acc + p.currentWeight, 0) +
             this.results.lowerDeck.reduce((acc, h) => acc + h.current_weight, 0);
 
-        const currentConfig = CONFIG.PALLET_OPTIONS[configCode];
-        let totalGross = (currentConfig.count * currentConfig.tare_weight) +
+        // Конфиг берём из результата — он уже учитывает евро-паллеты
+        const currentConfig = this.results.config || CONFIG.PALLET_OPTIONS[configCode];
+        const uldTare = currentConfig.tare_weight + (currentConfig.euro_wood_weight || 0);
+        let totalGross = (currentConfig.count * uldTare) +
             this.results.lowerDeck.reduce((acc, h) => acc + h.current_weight, 0);
         let totalVolume = 0;
 
@@ -557,7 +568,7 @@ class CargoApp {
 
         // Requested vs Capability
         const requestedNet = this.cargo.reduce((acc, i) => acc + (i.weight * i.count), 0);
-        const totalTare = currentConfig.count * currentConfig.tare_weight;
+        const totalTare = currentConfig.count * uldTare;
         const maxNetCapability = maxLimit - totalTare;
 
         const isNetOverload = requestedNet > maxNetCapability;
@@ -569,7 +580,17 @@ class CargoApp {
                 Gross: ${totalGross.toLocaleString()} / ${maxLimit.toLocaleString()} kg <span style="color:var(--text-muted);font-weight:400;">(${loadPercentage}%)</span>
             </span>
             <span class="wt-net">Net loaded: ${totalW.toLocaleString()} kg &nbsp;·&nbsp; Vol: ${totalVolume.toFixed(1)} m³</span>
-            <span class="wt-net">Requested: ${requestedNet.toLocaleString()} kg &nbsp;·&nbsp; Tare: ${totalTare.toLocaleString()} kg</span>
+            <span class="wt-net">Requested: ${requestedNet.toLocaleString()} kg &nbsp;·&nbsp; Tare: ${totalTare.toLocaleString()} kg${currentConfig.euro ? ` (вкл. дерево ${(currentConfig.count * currentConfig.euro_wood_weight).toLocaleString()} кг)` : ''}</span>
+            ${currentConfig.euro ? `<span class="wt-net" style="color:#a3e635;">🪵 Евро-паллеты: площадка ${currentConfig.length_cross}×${currentConfig.width_long} см, высота груза ${currentConfig.max_height} см</span>` : ''}
+            ${(() => {
+                const c = this.euroCompare;
+                if (!c || c.current === c.alternative) return '';
+                const better = c.alternative > c.current;
+                const word = c.euroOn ? 'без евро-паллет' : 'с евро-паллетами';
+                return `<span class="wt-net" style="color:${better ? '#fbbf24' : '#94a3b8'};">`
+                    + `${better ? '⚠' : '✓'} ${word} загрузилось бы <strong>${c.alternative}</strong> мест против <strong>${c.current}</strong> сейчас`
+                    + `${better ? ' — попробуйте переключить галочку' : ''}</span>`;
+            })()}
             ${isNetOverload ? '<span class="wt-warn"><i class="fas fa-exclamation-triangle"></i> Structural limit exceeded</span>' : ''}
         `;
 
@@ -707,6 +728,28 @@ class CargoApp {
                 html += `<div style="margin-top:0.75rem; padding:0.5rem; background:#f59e0b11; border:1px solid #f59e0b44; border-radius:6px; font-size:0.8rem; color:#f59e0b;">
                     <strong>⚠ Cannot be loaded (physical constraints):</strong><br>
                     ${stuck.map(i => `${i.name}: ${i.count} units`).join('<br>')}
+                    ${(() => {
+                        // Не спасут ли евро-паллеты? (только если они сейчас выключены)
+                        // Спрашиваем сам упаковщик на пустом борту — он учитывает обвод
+                        // фюзеляжа, а простая проверка «влезает в прямоугольник» — нет.
+                        if (document.getElementById('use-euro-pallets')?.checked) return '';
+                        const code = document.getElementById('config-select').value;
+                        const aircraftId = document.getElementById('aircraft-select').value;
+                        const probeItems = stuck.filter(i => typeof i.length === 'number').map((i, k) => ({
+                            id: 'euro-probe-' + k, name: i.name, count: i.count,
+                            length: i.length, width: i.width, height: i.height, weight: i.weight,
+                            allowTipping: !!i.allowTipping, noStack: !!i.noStack, priority: false,
+                            mainDeckOnly: !!i.mainDeckOnly, lowerDeckOnly: !!i.lowerDeckOnly
+                        }));
+                        if (!probeItems.length) return '';
+                        const probe = Packer.packAircraft(code, probeItems, { aircraftId, euroPallets: true });
+                        const n = probe.pallets.reduce((a, p) => a + p.layers.reduce((x, l) => x + (l.count || 0), 0), 0)
+                            + probe.lowerDeck.reduce((a, h) => a + h.compartments.reduce((x, c) =>
+                                x + c.items.reduce((y, it) => y + it.count, 0), 0), 0);
+                        const eu = Packer.resolveConfig(code, { euroPallets: true });
+                        return n ? `<div style="margin-top:0.5rem; padding-top:0.5rem; border-top:1px solid #f59e0b44;">
+                            🪵 Включите <strong>евро-паллеты</strong> в шапке — площадка станет ${eu.length_cross}×${eu.width_long} см, и ${n} из этих мест встанут.</div>` : '';
+                    })()}
                 </div>`;
             }
         }
@@ -825,8 +868,9 @@ class CargoApp {
                         <div class="mf-header-badges">
                             <span class="mf-badge mf-badge-blue">&#9878; ${pallet.currentWeight.toLocaleString()} / ${pallet.maxNetWeight.toLocaleString()} кг (${pct}%)</span>
                             <span class="mf-badge mf-badge-green">&#128230; ${totalBoxes} коробок</span>
-                            <span class="mf-badge mf-badge-gray">&#128207; Высота стопки: ${pallet.currentHeight} см</span>
+                            <span class="mf-badge mf-badge-gray">&#128207; Высота стопки: ${Math.round(pallet.currentHeight * 10) / 10} см</span>
                             <span class="mf-badge mf-badge-gray">Поддон: ${pallet.config.length_cross}&times;${pallet.config.width_long}&times;${pallet.config.max_height} см</span>
+                            ${pallet.config.euro ? `<span class="mf-badge" style="background:#365314;color:#a3e635;">&#129717; Евро-паллеты: груз поднят на ${pallet.config.euro_lift} см, дерево ${pallet.woodWeight} кг</span>` : ''}
                         </div>
                     </div>
                     <button class="mf-close" onclick="this.closest('.mf-overlay').remove()">&times;</button>
@@ -1393,7 +1437,7 @@ class CargoApp {
     }
 }
 
-const BUILD_VERSION = '4.1';
+const BUILD_VERSION = '4.2';
 console.log(`SkyGuard Cargo Optimizer — build ${BUILD_VERSION}`);
 
 window.app = new CargoApp();

@@ -108,6 +108,22 @@ const CONFIG = {
         }
     ],
 
+    // ── ДЕРЕВЯННЫЕ ЕВРО-ПАЛЛЕТЫ ─────────────────────────────────────────────
+    // Кладутся на базу ULD и поднимают груз на 15 см. Груз оказывается выше
+    // бортика/сетки и может свешиваться на всю базу поддона, а не только на
+    // «чистую» площадку. Плата за это — 15 см высоты и вес самого дерева.
+    // Включается галочкой в шапке (options.euroPallets); выключено — поведение
+    // полностью прежнее.
+    EURO_PALLET: {
+        lift_cm: 15,              // на сколько поднимается груз
+        pallets_per_uld: 4,       // деревянных паллет на один ULD
+        weight_each_kg: 25,       // вес одной деревянной паллеты
+        footprint: {              // площадка, доступная при укладке на дерево
+            PAG: { length_cross: 317, width_long: 223 },
+            PMC: { length_cross: 317, width_long: 243 }
+        }
+    },
+
     AIRCRAFT_SPEC: {
         "UK75057": { name: "UK75057", max_gross_payload: 36513 },
         "UK75058": { name: "UK75058", max_gross_payload: 35818 }
@@ -196,7 +212,8 @@ class Pallet {
         this.config = config;
         this.maxGrossWeight = config.weight_limits[id] || config.default_weight;
         this.tareWeight = config.tare_weight;
-        this.maxNetWeight = this.maxGrossWeight - this.tareWeight;
+        this.woodWeight = config.euro_wood_weight || 0;   // деревянные евро-паллеты (0 если выкл.)
+        this.maxNetWeight = this.maxGrossWeight - this.tareWeight - this.woodWeight;
         this.currentWeight = 0;
         this.currentHeight = 0;
         this.layers = [];
@@ -207,13 +224,39 @@ class Pallet {
     }
 
     getFuselageWidth(heightCm) {
-        return Math.min(this.config.length_cross, getFuselageWidthFromProfile(heightCm, this.zone));
+        // На евро-паллетах груз начинается на 15 см выше пола поддона,
+        // поэтому обвод фюзеляжа берём по РЕАЛЬНОЙ высоте. Без евро lift = 0.
+        const lift = this.config.euro_lift || 0;
+        return Math.min(this.config.length_cross, getFuselageWidthFromProfile(heightCm + lift, this.zone));
     }
 
     remainingWeight() { return this.maxNetWeight - this.currentWeight; }
 }
 
 const Packer = {
+    /**
+     * Эффективный конфиг поддона. Без евро-паллет возвращает исходный объект
+     * CONFIG.PALLET_OPTIONS[code] как есть. С евро-паллетами площадка
+     * расширяется до базы ULD, высота груза уменьшается на 15 см, а вес
+     * дерева вычитается из грузоподъёмности позиции.
+     */
+    resolveConfig: (configCode, options = {}) => {
+        const base = CONFIG.PALLET_OPTIONS[configCode];
+        if (!options.euroPallets) return base;
+        const E = CONFIG.EURO_PALLET;
+        const fp = E.footprint[configCode];
+        if (!fp) return base;
+        return {
+            ...base,
+            length_cross: fp.length_cross,
+            width_long: fp.width_long,
+            max_height: base.max_height - E.lift_cm,
+            euro: true,
+            euro_lift: E.lift_cm,
+            euro_wood_weight: E.pallets_per_uld * E.weight_each_kg
+        };
+    },
+
     // Check if item can physically pass through a door opening.
     // item.dims is sorted ascending [smallest, mid, largest].
     // For an item to fit through a door, its two smallest dimensions must
@@ -588,13 +631,30 @@ const Packer = {
 
         let best = null, bestScore = -1;
         for (const h of heights) {
-            // Grid-seeded and free-form fills win in different situations
-            // (uniform vs. mixed cargo), so try both and keep the fuller tier.
-            for (const seedGrid of [true, false]) {
-                const tier = Packer.fillTier(container, h, candidates, caps, seedGrid);
-                if (!tier) continue;
-                const score = tier.placedVolume / h;   // m³ gained per cm of height
-                if (score > bestScore) { bestScore = score; best = tier; }
+            // Pools of candidates to try for this tier height:
+            //  1) every variant that fits under h (mixed tiers, as before);
+            //  2) only variants whose height is EXACTLY h.
+            // Pool 2 matters when tipping is allowed: fillTier greedily places the
+            // biggest footprint first, so a box laid flat (e.g. 135x120, h=100)
+            // could crowd out the upright orientation (120x100, h=135) that fits
+            // twice as many per tier — ticking "Tip OK" then made the load WORSE
+            // (120x100x135 x150 on PAG: 30 instead of 60).
+            // Tiers are chosen greedily, so a better first tier can occasionally
+            // spoil later ones. Pool 2 is therefore only used in the 'exact' run,
+            // and packAircraft keeps that run only when it is at least as good in
+            // BOTH boxes and kg (see the wrapper at the top of packAircraft).
+            const exact = container.exactHeightPool
+                ? candidates.filter(c => Math.abs(c.variant.h - h) < 0.001) : [];
+            const pools = (exact.length && exact.length < candidates.length) ? [candidates, exact] : [candidates];
+            for (const pool of pools) {
+                // Grid-seeded and free-form fills win in different situations
+                // (uniform vs. mixed cargo), so try both and keep the fuller tier.
+                for (const seedGrid of [true, false]) {
+                    const tier = Packer.fillTier(container, h, pool, caps, seedGrid);
+                    if (!tier) continue;
+                    const score = tier.placedVolume / h;   // m³ gained per cm of height
+                    if (score > bestScore) { bestScore = score; best = tier; }
+                }
             }
         }
         return best;
@@ -611,12 +671,32 @@ const Packer = {
         return Array.from(byType.values()).sort((a, b) => b.count - a.count);
     },
     packAircraft: (configCode, cargoItems, options = {}) => {
-        const config = CONFIG.PALLET_OPTIONS[configCode];
+        // Two tier-building modes (see buildBestTier): 'classic' is exactly the
+        // build 4.1 behaviour; 'exact' additionally tries single-orientation
+        // tiers. The 'exact' result replaces 'classic' ONLY if it loads at least
+        // as many boxes AND at least as many kg, and strictly more of one —
+        // so switching this on can never make a load plan worse than 4.1.
+        if (!options._tierMode) {
+            const classic = Packer.packAircraft(configCode, cargoItems, { ...options, _tierMode: 'classic' });
+            const exact = Packer.packAircraft(configCode, cargoItems, { ...options, _tierMode: 'exact' });
+            const tally = (r) => {
+                let boxes = 0, kg = 0;
+                r.pallets.forEach(p => { kg += p.currentWeight; p.layers.forEach(l => boxes += (l.count || 0)); });
+                r.lowerDeck.forEach(h => h.compartments.forEach(c => {
+                    kg += c.weight; c.items.forEach(i => boxes += i.count);
+                }));
+                return { boxes, kg };
+            };
+            const a = tally(classic), b = tally(exact);
+            const exactWins = b.boxes >= a.boxes && b.kg >= a.kg - 1e-6 && (b.boxes > a.boxes || b.kg > a.kg + 1e-6);
+            return exactWins ? exact : classic;
+        }
+        const config = Packer.resolveConfig(configCode, options);
         const aircraftId = options.aircraftId || "UK75057";
         const maxGrossLimit = CONFIG.AIRCRAFT_SPEC[aircraftId]?.max_gross_payload || 999999;
         const mainDeckOnlyGlobal = options.mainDeckOnly || false;
 
-        let currentTotalGross = config.count * config.tare_weight;
+        let currentTotalGross = config.count * (config.tare_weight + (config.euro_wood_weight || 0));
 
         // --- PRE-PROCESS: GROUP & CLASSIFY ITEMS ---
         let groupedItemsMap = new Map();
@@ -674,7 +754,8 @@ const Packer = {
                     crossWidth: (z) => Math.min(p.config.length_cross, p.getFuselageWidth(z)),
                     longLength: p.config.width_long,
                     maxHeight: p.config.max_height,
-                    currentHeight: p.currentHeight
+                    currentHeight: p.currentHeight,
+                    exactHeightPool: options._tierMode === 'exact'
                 };
 
                 while (true) {
@@ -789,7 +870,8 @@ const Packer = {
                         crossWidth: compData.floor_width_cm,
                         longLength: compSpec.max_length_cm,
                         maxHeight: compSpec.max_height_cm,
-                        currentHeight: compData.height_used
+                        currentHeight: compData.height_used,
+                        exactHeightPool: options._tierMode === 'exact'
                     };
 
                     while (true) {
@@ -869,7 +951,7 @@ const Packer = {
         // (weight caps on a pallet may have blocked it earlier).
         packToLowerDeck(flexibleItems);
 
-        return { pallets, lowerDeck: lowerDeckResults, leftovers: workingItems.filter(i => i.count > 0), aircraftId, maxGrossLimit };
+        return { pallets, lowerDeck: lowerDeckResults, leftovers: workingItems.filter(i => i.count > 0), aircraftId, maxGrossLimit, config };
     },
 
     /**
@@ -917,7 +999,12 @@ const Packer = {
                 mdLoaded,
                 ldLoaded,
                 leftoverCount,
-                leftovers: result.leftovers.map(i => ({ name: i.name, count: i.count }))
+                leftovers: result.leftovers.map(i => ({
+                    name: i.name, count: i.count,
+                    length: i.length, width: i.width, height: i.height, weight: i.weight,
+                    allowTipping: i.allowTipping, noStack: i.noStack, priority: i.priority,
+                    mainDeckOnly: i.mainDeckOnly, lowerDeckOnly: i.lowerDeckOnly
+                }))
             });
 
             // Nothing could be loaded — the rest is physically un-loadable. Drop this

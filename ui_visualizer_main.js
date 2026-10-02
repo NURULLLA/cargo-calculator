@@ -193,6 +193,18 @@ class MainDeckViz {
                 }
             });
 
+            // Евро-паллеты: деревянный настил под грузом, груз поднят на euro_lift см
+            if (p.config.euro && p.config.euro_lift) {
+                const lift = p.config.euro_lift;
+                group.children.forEach(ch => { if (ch !== baseMesh) ch.position.y += lift; });
+                const woodGeom = new THREE.BoxGeometry(p.config.width_long, lift, p.config.length_cross);
+                const woodMesh = new THREE.Mesh(woodGeom, new THREE.MeshLambertMaterial({ color: 0xa16207 }));
+                woodMesh.position.y = 2.5 + lift / 2;
+                woodMesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(woodGeom),
+                    new THREE.LineBasicMaterial({ color: 0x713f12 })));
+                group.add(woodMesh);
+            }
+
             this.scene.add(group);
             currentX += p.config.width_long + gap;
         });
