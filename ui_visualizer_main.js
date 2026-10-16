@@ -70,11 +70,25 @@ class MainDeckViz {
             const group = new THREE.Group();
             group.position.x = currentX;
 
-            // Pallet Base
+            // Pallet Base. У повёрнутого поддона width_long уже стоит ВДОЛЬ
+            // борта (301/317 см), а length_cross — поперёк (209/229), поэтому
+            // геометрия та же, разворот получается сам. Подсвечиваем синим.
             const baseGeom = new THREE.BoxGeometry(p.config.width_long, 5, p.config.length_cross);
-            const baseMat = new THREE.MeshLambertMaterial({ color: 0x475569 });
+            const baseMat = new THREE.MeshLambertMaterial({ color: p.rotated ? 0x1d4ed8 : 0x475569 });
             const baseMesh = new THREE.Mesh(baseGeom, baseMat);
             group.add(baseMesh);
+
+            // Занятая повёрнутым поддоном длина пола — видно, что свес съедает
+            // соседнюю позицию.
+            if (p.rotated && p.floorUsed) {
+                const fGeom = new THREE.BoxGeometry(p.floorUsed, 2, p.config.length_cross + 20);
+                const fMesh = new THREE.Mesh(fGeom, new THREE.MeshLambertMaterial({
+                    color: 0x1d4ed8, transparent: true, opacity: 0.18 }));
+                fMesh.position.y = -3;
+                fMesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(fGeom),
+                    new THREE.LineBasicMaterial({ color: 0x60a5fa })));
+                group.add(fMesh);
+            }
 
             // Palette so each box type in a mixed layer is distinguishable
             const TYPE_COLORS = [0x0ea5e9, 0x10b981, 0xf59e0b, 0xef4444, 0x8b5cf6, 0x06b6d4, 0xec4899, 0x84cc16];
@@ -206,7 +220,8 @@ class MainDeckViz {
             }
 
             this.scene.add(group);
-            currentX += p.config.width_long + gap;
+            // Повёрнутый поддон отодвигает следующий на всю занятую длину пола.
+            currentX += (p.rotated && p.floorUsed ? p.floorUsed : p.config.width_long) + gap;
         });
 
         this.addIndicators(currentX);
