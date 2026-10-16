@@ -124,6 +124,42 @@ const CONFIG = {
         }
     },
 
+    // ── ПОВЁРНУТЫЕ ПАЛЛЕТЫ (НЕГАБАРИТ) ──────────────────────────────────────
+    // Замки крепления идут по полу с постоянным шагом: 223 см под PAG (88")
+    // и 244 см под PMC (96"). Обычный паллет ставится «223 вдоль борта,
+    // 317 поперёк» и съедает ровно один шаг.
+    //
+    // Повёрнутый паллет ставится наоборот — 317 см вдоль борта. Сам поворот
+    // площадку НЕ увеличивает (301×209 и 209×301 — один и тот же
+    // прямоугольник). Выигрыш в двух других вещах:
+    //   1) груз может свешиваться за край ВДОЛЬ борта — поперёк свешивать
+    //      некуда, там обвод фюзеляжа;
+    //   2) поперёк остаётся всего 209/229 см вместо 301, поэтому сужение
+    //      фюзеляжа почти не режет высоту.
+    //
+    // Плата — занятая длина пола. Половину шага замков поделить нельзя,
+    // поэтому занятое место округляется вверх до ПОЛУПОЗИЦИИ:
+    //   пустой повёрнутый паллет 317 см  → 1,5 позиции
+    //   груз 4 м (410 см пола)           → 2,0 позиции → 7 паллет вместо 15
+    //   груз 5 м (510 см пола)           → 2,5 позиции → 6 паллет
+    //   груз 6 м (610 см пола)           → 3,0 позиции → 5 паллет
+    // Это ровно те «6-7 вместо 15», которые получаются на практике.
+    LOCK_PITCH_CM: { PAG: 223, PMC: 244 },
+
+    ROTATED_PALLET: {
+        max_cargo_length: 600,   // предельная длина груза вместе со свесом
+        floor_base: 317,         // длина самого паллета по полу в повороте
+        clearance: 10,           // зазор от свеса до соседней позиции
+        // Под длинномер деревянные евро-паллеты кладут ВСЕГДА — иначе
+        // крутить поддон нет смысла. Поэтому площадка повёрнутого поддона
+        // это всегда полная база ULD, а не «чистые» 301×209/229, и груз
+        // всегда поднят на 15 см (высота груза 190 см, +100 кг дерева).
+        footprint: {
+            PAG: { cross: 223, along: 317 },
+            PMC: { cross: 243, along: 317 }
+        }
+    },
+
     AIRCRAFT_SPEC: {
         "UK75057": { name: "UK75057", max_gross_payload: 36513 },
         "UK75058": { name: "UK75058", max_gross_payload: 35818 }
@@ -207,20 +243,36 @@ class CargoItem {
 }
 
 class Pallet {
-    constructor(id, config) {
+    constructor(id, config, opts = {}) {
         this.id = id;
         this.config = config;
-        this.maxGrossWeight = config.weight_limits[id] || config.default_weight;
+        this.rotated = !!opts.rotated;
+        // Повёрнутый паллет ставится в середину борта (в нос и хвост он не
+        // влезает — там обвод), поэтому у него всегда зона MIDDLE.
+        // По весу он стоит на 1,5-3 позициях, нагрузка распределяется на
+        // бóльшую длину пола, поэтому предел берём как у усиленных позиций
+        // (PAG 4264 кг, PMC 4652 кг) — решение загрузчика.
+        this.maxGrossWeight = this.rotated
+            ? Math.max(config.default_weight, ...Object.values(config.weight_limits))
+            : (config.weight_limits[id] || config.default_weight);
         this.tareWeight = config.tare_weight;
         this.woodWeight = config.euro_wood_weight || 0;   // деревянные евро-паллеты (0 если выкл.)
         this.maxNetWeight = this.maxGrossWeight - this.tareWeight - this.woodWeight;
         this.currentWeight = 0;
         this.currentHeight = 0;
         this.layers = [];
-        
-        if (id === 1) this.zone = 'NOSE';
+
+        if (this.rotated) this.zone = 'MIDDLE';
+        else if (id === 1) this.zone = 'NOSE';
         else if ((config.code === "PMC" && id === 13) || (config.code === "PAG" && id === 15)) this.zone = 'TAIL';
         else this.zone = 'MIDDLE';
+
+        if (this.rotated) {
+            this.positions = 0;      // сколько замковых позиций занял (шаг 0,5)
+            this.floorUsed = 0;      // занятая длина пола, см
+            this.maxAlong = 0;       // самый длинный груз вдоль борта, см
+            this.overhangMode = opts.overhangMode === 'one' ? 'one' : 'both';
+        }
     }
 
     getFuselageWidth(heightCm) {
@@ -256,6 +308,59 @@ const Packer = {
             euro_wood_weight: E.pallets_per_uld * E.weight_each_kg
         };
     },
+
+    /**
+     * Конфиг ПОВЁРНУТОГО поддона. Под длинномер деревянные поддоны кладут
+     * всегда, поэтому площадка — всегда полная база ULD: 317 см вдоль борта
+     * (опора под свес) и 223/243 см поперёк. Груз при этом поднят на 15 см,
+     * значит высота груза 190 см и +100 кг дерева на поддон — независимо от
+     * галочки евро-паллет в шапке.
+     */
+    resolveRotatedConfig: (configCode) => {
+        const base = CONFIG.PALLET_OPTIONS[configCode];
+        const R = CONFIG.ROTATED_PALLET;
+        const E = CONFIG.EURO_PALLET;
+        const fp = R.footprint[configCode];
+        if (!base || !fp) return null;
+        return {
+            ...base,
+            length_cross: fp.cross,   // поперёк борта
+            width_long: fp.along,     // вдоль борта — опорная площадка
+            max_height: base.max_height - E.lift_cm,
+            euro: true,
+            euro_lift: E.lift_cm,
+            euro_wood_weight: E.pallets_per_uld * E.weight_each_kg,
+            rotated: true,
+            rotated_max_length: R.max_cargo_length,
+            rotated_floor_base: R.floor_base,
+            rotated_clearance: R.clearance
+        };
+    },
+
+    // Занятые замковые позиции с округлением вверх до половины шага —
+    // половину шага замков поделить нельзя.
+    rotatedPositions: (floorNeedCm, pitchCm) =>
+        Math.ceil((floorNeedCm / pitchCm) * 2) / 2,
+
+    // Влезает ли место на ОБЫЧНЫЙ (неповёрнутый) поддон хоть в какой-то
+    // ориентации, с учётом обвода фюзеляжа на своей высоте.
+    fitsNormalPallet: (item, cfg) => item.getVariants().some(v => {
+        if (v.h > cfg.max_height + 1e-6) return false;
+        const fw = Math.min(cfg.length_cross,
+            getFuselageWidthFromProfile(v.h + (cfg.euro_lift || 0), 'MIDDLE'));
+        return (v.l <= fw + 1e-6 && v.w <= cfg.width_long + 1e-6) ||
+               (v.w <= fw + 1e-6 && v.l <= cfg.width_long + 1e-6);
+    }),
+
+    // Влезает ли место на ПОВЁРНУТЫЙ поддон: длинная сторона идёт вдоль борта
+    // (до rotated_max_length вместе со свесом), короткая — поперёк, в обвод.
+    fitsRotatedPallet: (item, rcfg) => item.getVariants().some(v => {
+        if (v.h > rcfg.max_height + 1e-6) return false;
+        const along = Math.max(v.l, v.w), cross = Math.min(v.l, v.w);
+        const fw = Math.min(rcfg.length_cross,
+            getFuselageWidthFromProfile(v.h + (rcfg.euro_lift || 0), 'MIDDLE'));
+        return along <= rcfg.rotated_max_length + 1e-6 && cross <= fw + 1e-6;
+    }),
 
     // Check if item can physically pass through a door opening.
     // item.dims is sorted ascending [smallest, mid, largest].
@@ -670,7 +775,182 @@ const Packer = {
         }
         return Array.from(byType.values()).sort((a, b) => b.count - a.count);
     },
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  ПОВЁРНУТЫЙ ПАЛЛЕТ — УКЛАДКА ПОЛОСАМИ
+    //
+    //  Длинномер кладётся вдоль борта и свешивается за край поддона. Висящий
+    //  конец ничем не поддержан, поэтому в одной полосе поперёк может лежать
+    //  только ОДНО место: каждое место обязано накрывать опорную площадку
+    //  поддона. Полосы набираются поперёк борта (209/229 см), полосы
+    //  складываются в ярусы по высоте — так же, как это делают грузчики.
+    //
+    //  Свес: 'both' — груз по центру, свешивается с двух сторон симметрично;
+    //        'one'  — груз прижат к одному краю, свешивается в одну сторону.
+    //  На занятую длину пола режим не влияет, только на геометрию.
+    // ─────────────────────────────────────────────────────────────────────
+    fillRotatedTier: (pallet, tierHeight, candidates, caps) => {
+        const cfg = pallet.config;
+        const topZ = pallet.currentHeight + tierHeight;
+        if (topZ > cfg.max_height + 0.001) return null;
+
+        const availCross = pallet.getFuselageWidth(topZ);
+        const maxLen = cfg.rotated_max_length;
+        const supported = cfg.width_long;
+        if (availCross <= 0) return null;
+
+        const entries = [];
+        for (const c of candidates) {
+            if (c.variant.h > tierHeight + 0.001) continue;
+            const along = Math.max(c.variant.l, c.variant.w);
+            const cross = Math.min(c.variant.l, c.variant.w);
+            if (along > maxLen + 1e-6) continue;
+            if (cross > availCross + 1e-6) continue;
+            entries.push({ item: c.item, variant: c.variant, along, cross });
+        }
+        if (!entries.length) return null;
+
+        // Самые объёмные полосы первыми — они задают занятую длину пола,
+        // и рядом с ними выгоднее доложить что-то ещё, а не наоборот.
+        entries.sort((a, b) => (b.along * b.cross) - (a.along * a.cross));
+
+        const placements = [];
+        let used = 0, placedWeight = 0, placedVolume = 0;
+        const usedPerItem = new Map();
+
+        let progress = true;
+        while (progress) {
+            progress = false;
+            for (const e of entries) {
+                const taken = usedPerItem.get(e.item) || 0;
+                if (e.item.count - taken <= 0) continue;
+                if (used + e.cross > availCross + 1e-6) continue;
+                if (placedWeight + e.variant.weight > caps.weightRemaining + 0.001) continue;
+                if (placedWeight + e.variant.weight > caps.grossRemaining + 0.001) continue;
+
+                placements.push({
+                    item: e.item,
+                    name: e.variant.name,
+                    xRaw: used,
+                    y: 0,                     // окончательный y ставится ниже
+                    w: e.cross,
+                    l: e.along,
+                    h: e.variant.h,
+                    weight: e.variant.weight,
+                    overhang: Math.max(0, e.along - supported)
+                });
+                used += e.cross;
+                usedPerItem.set(e.item, taken + 1);
+                placedWeight += e.variant.weight;
+                placedVolume += (e.along * e.cross * e.variant.h) / 1000000;
+                progress = true;
+                break;
+            }
+        }
+        if (!placements.length) return null;
+
+        // Начало координат вдоль борта — передний край ОПОРНОЙ площадки
+        // поддона, то есть y ∈ [0, supported] это сам поддон. Свес уходит за
+        // эти границы: при одностороннем режиме только вперёд (y = 0), при
+        // двустороннем симметрично в минус и в плюс.
+        const crossOffset = (availCross - used) / 2;
+        const maxAlong = placements.reduce((m, p) => Math.max(m, p.l), 0);
+        for (const p of placements) {
+            p.x = crossOffset + p.xRaw;
+            delete p.xRaw;
+            p.y = pallet.overhangMode === 'one'
+                ? 0                            // прижат к одному краю
+                : (supported - p.l) / 2;       // по центру, свес с двух сторон
+        }
+
+        return { placements, placedWeight, placedVolume, height: tierHeight, availCross, maxAlong };
+    },
+
+    // Подбирает высоту яруса повёрнутого паллета по тому же принципу, что и
+    // buildBestTier: максимум объёма на сантиметр высоты стопки.
+    buildBestRotatedTier: (pallet, items, caps) => {
+        const headroom = pallet.config.max_height - pallet.currentHeight;
+        if (headroom <= 0) return null;
+
+        const candidates = [];
+        const heightSet = new Set();
+        for (const item of items) {
+            if (item.count <= 0) continue;
+            if (item.weight > caps.weightRemaining || item.weight > caps.grossRemaining) continue;
+            for (const variant of item.getVariants()) {
+                if (variant.h > headroom + 0.001) continue;
+                candidates.push({ item, variant });
+                heightSet.add(variant.h);
+            }
+        }
+        if (!candidates.length) return null;
+
+        let best = null, bestScore = -1;
+        for (const h of Array.from(heightSet).sort((a, b) => b - a)) {
+            const tier = Packer.fillRotatedTier(pallet, h, candidates, caps);
+            if (!tier) continue;
+            const score = tier.placedVolume / h;
+            if (score > bestScore) { bestScore = score; best = tier; }
+        }
+        return best;
+    },
+
+    // Что реально загружено в план — для сравнения вариантов между собой.
+    // chg — chargeable weight по правилу IATA 1:6000 (max из фактического и
+    // объёмного веса каждого места). Это единственная метрика, которая
+    // честно сравнивает «12 тонн мелочи» с «лёгким, но огромным негабаритом».
+    loadTally: (r) => {
+        const VOL_KG_PER_M3 = 1000000 / 6000;   // ≈166,7 кг/м³
+        let boxes = 0, kg = 0, vol = 0, chg = 0;
+        const add = (pieceKg, pieceVol, n = 1) => {
+            kg += pieceKg * n; vol += pieceVol * n;
+            chg += Math.max(pieceKg, pieceVol * VOL_KG_PER_M3) * n;
+        };
+        r.pallets.forEach(p => {
+            p.layers.forEach(l => {
+                boxes += (l.count || 0);
+                if (l.placements && l.placements.length)
+                    l.placements.forEach(pl => add(pl.weight, (pl.w * pl.l * pl.h) / 1000000));
+                else if (l.dim_cross && l.dim_long && l.height && l.count)
+                    add(l.weight, (l.dim_cross * l.dim_long * l.height) / 1000000, l.count);
+            });
+        });
+        r.lowerDeck.forEach(h => h.compartments.forEach(c =>
+            c.items.forEach(i => { boxes += i.count; add(i.weight, (i.l * i.w * i.h) / 1000000, i.count); })
+        ));
+        return { boxes, kg, vol, chg };
+    },
+
     packAircraft: (configCode, cargoItems, options = {}) => {
+        // ── СКОЛЬКО ПОВЁРНУТЫХ ПАЛЛЕТ СТАВИТЬ ───────────────────────────
+        // Повёрнутый паллет съедает 1,5-3 позиции, поэтому «поставить все,
+        // какие можно» нередко выбрасывает с борта тонны обычного груза.
+        // Поэтому перебираем число повёрнутых паллет от 0 и берём вариант с
+        // наибольшим chargeable weight (1:6000) — он сам балансирует тяжёлое
+        // против объёмного; при равенстве — больше кг, затем больше мест.
+        // Ноль всегда среди вариантов, поэтому включённая галочка не может
+        // дать план хуже выключенной.
+        if (options.rotatedPallets && options._rotBudget === undefined) {
+            // Перебор идёт ровно в тех же условиях, что и финальный расчёт
+            // (с обоими режимами ярусов), иначе выбранный бюджет может
+            // оказаться хуже нулевого.
+            const probe = Packer.packAircraft(configCode, cargoItems, { ...options, _rotBudget: Infinity });
+            const maxRot = probe.floor.rotatedCount;
+            if (!maxRot) return probe;   // негабарита нет — это и есть вариант «0»
+
+            const better = (s, t) => (s.chg - t.chg > 1e-6) ||
+                (Math.abs(s.chg - t.chg) <= 1e-6 && (s.kg - t.kg > 1e-6 ||
+                 (Math.abs(s.kg - t.kg) <= 1e-6 && s.boxes > t.boxes)));
+
+            let bestRes = probe, bestScore = Packer.loadTally(probe);
+            for (let k = maxRot - 1; k >= 0; k--) {
+                const r = Packer.packAircraft(configCode, cargoItems, { ...options, _rotBudget: k });
+                const s = Packer.loadTally(r);
+                if (better(s, bestScore)) { bestScore = s; bestRes = r; }
+            }
+            return bestRes;
+        }
+
         // Two tier-building modes (see buildBestTier): 'classic' is exactly the
         // build 4.1 behaviour; 'exact' additionally tries single-orientation
         // tiers. The 'exact' result replaces 'classic' ONLY if it loads at least
@@ -696,7 +976,15 @@ const Packer = {
         const maxGrossLimit = CONFIG.AIRCRAFT_SPEC[aircraftId]?.max_gross_payload || 999999;
         const mainDeckOnlyGlobal = options.mainDeckOnly || false;
 
-        let currentTotalGross = config.count * (config.tare_weight + (config.euro_wood_weight || 0));
+        // Главная палуба считается не «15 поддонов», а бюджетом ДЛИНЫ ПОЛА:
+        // шаг замков × число позиций. Обычный поддон съедает один шаг,
+        // повёрнутый — 1,5 шага и больше (см. CONFIG.ROTATED_PALLET).
+        const pitch = CONFIG.LOCK_PITCH_CM[configCode] || 223;
+        const totalFloor = config.count * pitch;
+        const rotCfg = options.rotatedPallets ? Packer.resolveRotatedConfig(configCode) : null;
+        let floorUsed = 0;
+        let rotatedPallets = [];
+        let currentTotalGross = 0;
 
         // --- PRE-PROCESS: GROUP & CLASSIFY ITEMS ---
         let groupedItemsMap = new Map();
@@ -717,6 +1005,100 @@ const Packer = {
             item.lowerDeckOnly = i.lowerDeckOnly || false;
             return item;
         });
+
+        // --- PASS 0: ПОВЁРНУТЫЕ ПАЛЛЕТЫ ПОД НЕГАБАРИТ ---
+        // Берём только те места, которые на обычный поддон не встают ни в
+        // какой ориентации, но встают на повёрнутый. Поэтому включение
+        // галочки не может ухудшить план: она только добавляет то, что иначе
+        // осталось бы в остатке.
+        if (rotCfg) {
+            const oversize = workingItems.filter(i =>
+                i.count > 0 &&
+                !i.lowerDeckOnly &&
+                Packer.fitsThroughDoor(i, CONFIG.DOOR_MAIN) &&
+                !Packer.fitsNormalPallet(i, config) &&
+                Packer.fitsRotatedPallet(i, rotCfg));
+
+            // Тару на этом этапе резервируем по максимуму позиций — это
+            // консервативно; точное число ULD известно только после прохода.
+            let provisionalGross = config.count * (config.tare_weight + (config.euro_wood_weight || 0));
+            const minPositions = Packer.rotatedPositions(rotCfg.rotated_floor_base, pitch);
+            let rid = 0;
+
+            const budget = options._rotBudget === undefined ? Infinity : options._rotBudget;
+            while (oversize.some(i => i.count > 0)) {
+                if (rotatedPallets.length >= budget) break;
+                const availPositions = Math.floor(((totalFloor - floorUsed) / pitch) * 2) / 2;
+                if (availPositions < minPositions) break;
+
+                // Длиннее, чем осталось свободного пола, брать нельзя.
+                const maxLenThis = Math.min(rotCfg.rotated_max_length,
+                    availPositions * pitch - rotCfg.rotated_clearance);
+                const palletCfg = { ...rotCfg, rotated_max_length: maxLenThis };
+                const p = new Pallet(`R${++rid}`, palletCfg,
+                    { rotated: true, overhangMode: options.overhangMode });
+
+                while (true) {
+                    if (!oversize.some(i => i.count > 0)) break;
+                    if (provisionalGross >= maxGrossLimit) break;
+                    if (p.currentHeight >= palletCfg.max_height) break;
+
+                    const caps = {
+                        weightRemaining: p.remainingWeight(),
+                        grossRemaining: maxGrossLimit - provisionalGross
+                    };
+                    if (caps.weightRemaining <= 0 || caps.grossRemaining <= 0) break;
+
+                    const tier = Packer.buildBestRotatedTier(p, oversize, caps);
+                    if (!tier) break;
+
+                    let closePallet = false;
+                    for (const pl of tier.placements) {
+                        pl.item.count -= 1;
+                        if (pl.item.noStack) closePallet = true;
+                    }
+                    p.currentWeight += tier.placedWeight;
+                    provisionalGross += tier.placedWeight;
+                    p.maxAlong = Math.max(p.maxAlong, tier.maxAlong);
+
+                    const contents = Packer.summariseTier(tier.placements);
+                    const dominant = contents[0];
+                    p.layers.push({
+                        box_name: contents.length > 1 ? `Mixed — ${contents.length} types` : dominant.name,
+                        count: tier.placements.length,
+                        height: tier.height,
+                        z_start: p.currentHeight,
+                        z_end: p.currentHeight + tier.height,
+                        weight: dominant.weight,
+                        total_weight: tier.placedWeight,
+                        placements: tier.placements.map(pl => ({
+                            name: pl.name, x: pl.x, y: pl.y, w: pl.w, l: pl.l, h: pl.h,
+                            weight: pl.weight, overhang: pl.overhang
+                        })),
+                        contents,
+                        avail_cross: tier.availCross,
+                        rotated: true,
+                        meta: { main: { r: 0, c: 0 }, side: null },
+                        orient_type: 'R',
+                        dim_cross: dominant.w,
+                        dim_long: dominant.l
+                    });
+
+                    p.currentHeight += tier.height;
+                    if (closePallet) p.currentHeight = palletCfg.max_height;
+                }
+
+                // Ничего не влезло — дальше тоже не влезет, иначе вечный цикл.
+                if (!p.layers.length) break;
+
+                const floorNeed = Math.max(rotCfg.rotated_floor_base,
+                    p.maxAlong + rotCfg.rotated_clearance);
+                p.positions = Packer.rotatedPositions(floorNeed, pitch);
+                p.floorUsed = p.positions * pitch;
+                floorUsed += p.floorUsed;
+                rotatedPallets.push(p);
+            }
+        }
 
         // Classification helper — mirrors Packer.fitsThroughDoor logic
         const fitsInAnyLowerDoor = (item) => {
@@ -740,10 +1122,25 @@ const Packer = {
         });
 
         // --- PASS 1: PACK ON MAIN DECK ---
+        // Обычных поддонов влезает столько, сколько целых шагов замков
+        // осталось после повёрнутых.
+        const normalCount = Math.max(0, Math.floor((totalFloor - floorUsed) / pitch));
         let pallets = [];
-        for (let i = 1; i <= config.count; i++) {
+        for (let i = 1; i <= normalCount; i++) {
             pallets.push(new Pallet(i, config));
         }
+        // Повёрнутые идут в конец списка: на их опорную площадку (301×209)
+        // обычные проходы могут доложить груз сверху стандартным способом.
+        pallets.push(...rotatedPallets);
+
+        // Тара считается по РЕАЛЬНОМУ числу ULD: повёрнутый паллет занимает
+        // 1,5+ позиции, но сам он один, поэтому поддонов на борту меньше.
+        // У повёрнутых своя тара — под ними дерево есть всегда.
+        const uldTare = config.tare_weight + (config.euro_wood_weight || 0);
+        const rotTare = rotCfg ? rotCfg.tare_weight + (rotCfg.euro_wood_weight || 0) : 0;
+        const totalTare = normalCount * uldTare + rotatedPallets.length * rotTare;
+        currentTotalGross = totalTare
+            + rotatedPallets.reduce((a, p) => a + p.currentWeight, 0);
 
         const packToPallets = (targetItems) => {
             sortForMain(targetItems);
@@ -951,7 +1348,24 @@ const Packer = {
         // (weight caps on a pallet may have blocked it earlier).
         packToLowerDeck(flexibleItems);
 
-        return { pallets, lowerDeck: lowerDeckResults, leftovers: workingItems.filter(i => i.count > 0), aircraftId, maxGrossLimit, config };
+        return {
+            pallets,
+            lowerDeck: lowerDeckResults,
+            leftovers: workingItems.filter(i => i.count > 0),
+            aircraftId, maxGrossLimit, config,
+            floor: {
+                pitch,
+                totalFloor,
+                totalPositions: config.count,
+                normalPositions: normalCount,
+                rotatedPositions: rotatedPallets.reduce((a, p) => a + p.positions, 0),
+                rotatedCount: rotatedPallets.length,
+                uldCount: pallets.length,
+                uldTare,
+                rotTare,
+                totalTare
+            }
+        };
     },
 
     /**
