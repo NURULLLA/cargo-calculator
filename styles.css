@@ -170,7 +170,80 @@ header {
     display: flex;
     gap: 0.75rem;
     align-items: center;
-    flex-shrink: 0;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    /* Must be allowed to shrink: with flex-shrink:0 the controls added up to a
+       fixed ~1270 px and pushed Calculate Load off the right edge. */
+    min-width: 0;
+}
+
+/* ─── Flight options (collapsible) ────────────────────────────── */
+.load-options { position: relative; }
+
+.load-options-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    white-space: nowrap;
+}
+.load-options-caret { font-size: 0.7em; opacity: 0.7; transition: transform 0.18s; }
+.load-options[data-open="true"] .load-options-caret { transform: rotate(180deg); }
+.load-options[data-open="true"] .load-options-trigger {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.load-options-panel {
+    position: absolute;
+    top: calc(100% + 0.5rem);
+    right: 0;
+    z-index: 200;
+    width: 330px;
+    max-width: calc(100vw - 2rem);
+    max-height: 70vh;
+    overflow-y: auto;
+    padding: 0.9rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+    background: var(--bg-card, #111d2e);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg, 12px);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
+}
+.load-options-panel[hidden] { display: none; }
+
+.load-options-field { display: flex; flex-direction: column; gap: 0.3rem; }
+.load-options-field[hidden] { display: none; }
+.load-options-field > label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+.load-options-field select { width: 100%; }
+
+.load-options-sep { height: 1px; background: var(--border); margin: 0.1rem 0; }
+
+.load-options-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.55rem;
+    padding: 0.5rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+}
+.load-options-check:hover { border-color: var(--accent); background: rgba(56, 189, 248, 0.05); }
+.load-options-check input { margin: 2px 0 0; cursor: pointer; flex-shrink: 0; }
+.load-options-check span { display: flex; flex-direction: column; gap: 2px; }
+.load-options-check strong { font-size: 0.84rem; font-weight: 600; }
+.load-options-check small { font-size: 0.72rem; color: var(--text-muted); line-height: 1.35; }
+.load-options-check:has(input:checked) {
+    border-color: var(--accent);
+    background: rgba(56, 189, 248, 0.08);
 }
 
 /* ─── Cards ───────────────────────────────────────────────────── */
@@ -397,6 +470,46 @@ header select:focus {
     accent-color: var(--accent);
     cursor: pointer;
 }
+
+/* ─── Cargo flags row ─────────────────────────────────────────── */
+.form-flags {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 0.5rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+}
+
+.flag-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.35rem 0.65rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 0.8rem;
+    color: var(--text-soft);
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    transition: border-color var(--transition), background var(--transition), color var(--transition);
+}
+.flag-chip:hover { border-color: var(--accent); color: var(--text-main); }
+.flag-chip input[type="checkbox"] {
+    width: 15px;
+    height: 15px;
+    margin: 0;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+.flag-chip:has(input:checked) {
+    border-color: var(--accent);
+    background: rgba(56, 189, 248, 0.08);
+    color: var(--text-main);
+}
+.flag-sep { width: 1px; align-self: stretch; background: var(--border); margin: 0 0.25rem; }
 
 /* ─── Tables ──────────────────────────────────────────────────── */
 .table-container {
@@ -917,7 +1030,10 @@ tr:hover td {
     }
 
     .header-actions select,
-    .header-actions button { width: 100%; }
+    .header-actions > button { width: 100%; }
+    .load-options { width: 100%; }
+    .load-options-trigger { width: 100%; justify-content: center; }
+    .load-options-panel { right: auto; left: 0; width: 100%; }
 
     .sidebar-footer { display: none; }
 }

@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
-    <link rel="stylesheet" href="styles.css?v=4.3">
+    <link rel="stylesheet" href="styles.css?v=4.4">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/three@0.145.0/build/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.145.0/examples/js/controls/OrbitControls.js"></script>
@@ -44,8 +44,8 @@
                 </button>
             </nav>
             <div class="sidebar-footer">
-                <p>build <strong id="build-version">4.3</strong></p>
-                <p class="build-note" id="build-date">2026-09-21</p>
+                <p>build <strong id="build-version">4.4</strong></p>
+                <p class="build-note" id="build-date">2026-10-16</p>
             </div>
         </aside>
 
@@ -58,29 +58,58 @@
                     <p id="tab-subtitle">Define batch dimensions and quantities</p>
                 </div>
                 <div class="header-actions">
-                    <select id="aircraft-select" class="btn-secondary" title="Select Aircraft">
-                        <option value="UK75057">UK75057 (Max Gross: 36,513 kg)</option>
-                        <option value="UK75058">UK75058 (Max Gross: 35,818 kg)</option>
-                    </select>
-                    <select id="config-select" class="btn-secondary" title="Select Aircraft Configuration">
-                        <option value="PAG">B757-200 (15× PAG)</option>
-                        <option value="PMC">B757-200 (13× PMC)</option>
-                    </select>
-                    <label id="euro-toggle" class="btn-secondary" title="Деревянные евро-паллеты на базе ULD: груз поднимается на 15 см и может свешиваться на всю базу поддона (PAG 317×223, PMC 317×243). Высота груза 190 см, +100 кг дерева на позицию."
-                           style="display:inline-flex; align-items:center; gap:6px; cursor:pointer; user-select:none;">
-                        <input type="checkbox" id="use-euro-pallets" style="margin:0; cursor:pointer;">
-                        <span>🪵 Евро-паллеты (+15 см)</span>
-                    </label>
-                    <label id="rotated-toggle" class="btn-secondary" title="Негабарит на ПОВЁРНУТОМ поддоне: поддон ставится 317 см вдоль борта, под грузом всегда деревянные поддоны, поэтому площадка — полная база ULD (317×223 для PAG, 317×243 для PMC), а груз может свешиваться за край до 600 см. Поперёк всего 223/243 см, поэтому обвод фюзеляжа почти не режет высоту. Цена — 15 см высоты (груз до 190 см), 100 кг дерева и занятая длина пола: пустой повёрнутый поддон это 1,5 позиции по замкам, груз 5 м уже 2,5 позиции."
-                           style="display:inline-flex; align-items:center; gap:6px; cursor:pointer; user-select:none;">
-                        <input type="checkbox" id="use-rotated-pallets" style="margin:0; cursor:pointer;">
-                        <span>↻ Повёрнутые паллеты (негабарит)</span>
-                    </label>
-                    <select id="overhang-mode" class="btn-secondary" title="С какой стороны груз свешивается за край повёрнутого поддона"
-                            style="display:none;">
-                        <option value="both">Свес с двух сторон</option>
-                        <option value="one">Свес в одну сторону</option>
-                    </select>
+                    <!-- Flight options sit in a collapsible panel. Inline they added up to
+                         ~1270 px and pushed Calculate Load past the right edge of a laptop
+                         window, so the main action could not be reached at all without
+                         maximising the browser. -->
+                    <div class="load-options">
+                        <button id="btn-load-options" class="btn-secondary load-options-trigger"
+                                type="button" aria-expanded="false" aria-controls="load-options-panel"
+                                title="Параметры рейса: самолёт, конфигурация паллет, евро-паллеты, повёрнутые паллеты">
+                            <i class="fas fa-sliders"></i>
+                            <span id="load-options-summary">Параметры</span>
+                            <i class="fas fa-chevron-down load-options-caret"></i>
+                        </button>
+
+                        <div id="load-options-panel" class="load-options-panel" hidden>
+                            <div class="load-options-field">
+                                <label for="aircraft-select">Самолёт</label>
+                                <select id="aircraft-select" title="Select Aircraft">
+                                    <option value="UK75057">UK75057 (Max Gross: 36,513 kg)</option>
+                                    <option value="UK75058">UK75058 (Max Gross: 35,818 kg)</option>
+                                </select>
+                            </div>
+
+                            <div class="load-options-field">
+                                <label for="config-select">Конфигурация</label>
+                                <select id="config-select" title="Select Aircraft Configuration">
+                                    <option value="PAG">B757-200 (15× PAG)</option>
+                                    <option value="PMC">B757-200 (13× PMC)</option>
+                                </select>
+                            </div>
+
+                            <div class="load-options-sep"></div>
+
+                            <label id="euro-toggle" class="load-options-check" title="Деревянные евро-паллеты на базе ULD: груз поднимается на 15 см и может свешиваться на всю базу поддона (PAG 317×223, PMC 317×243). Высота груза 190 см, +100 кг дерева на позицию.">
+                                <input type="checkbox" id="use-euro-pallets">
+                                <span><strong>🪵 Евро-паллеты</strong><small>+15 см подъёма, площадка 317×223, потолок груза 190 см, +100 кг дерева</small></span>
+                            </label>
+
+                            <label id="rotated-toggle" class="load-options-check" title="Негабарит на ПОВЁРНУТОМ поддоне: поддон ставится 317 см вдоль борта, под грузом всегда деревянные поддоны, поэтому площадка — полная база ULD (317×223 для PAG, 317×243 для PMC), а груз может свешиваться за край до 600 см. Поперёк всего 223/243 см, поэтому обвод фюзеляжа почти не режет высоту. Цена — 15 см высоты (груз до 190 см), 100 кг дерева и занятая длина пола: пустой повёрнутый поддон это 1,5 позиции по замкам, груз 5 м уже 2,5 позиции.">
+                                <input type="checkbox" id="use-rotated-pallets">
+                                <span><strong>↻ Повёрнутые паллеты</strong><small>Негабарит до 600 см вдоль борта. Занимает 1,5–3 позиции по замкам</small></span>
+                            </label>
+
+                            <div class="load-options-field" id="overhang-field" hidden>
+                                <label for="overhang-mode">Свес груза</label>
+                                <select id="overhang-mode" title="С какой стороны груз свешивается за край повёрнутого поддона">
+                                    <option value="both">Свес с двух сторон</option>
+                                    <option value="one">Свес в одну сторону</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
                     <button id="btn-calculate" class="btn-primary">
                         <i class="fas fa-calculator"></i> Calculate Load
                     </button>
@@ -118,26 +147,30 @@
                                 <label>Qty</label>
                                 <input type="number" id="item-qty" value="10" title="Quantity">
                             </div>
-                            <div class="input-group checkbox">
-                                <label><input type="checkbox" id="item-tip" checked> <i class="fas fa-rotate"></i> Allow Tipping/Rotation</label>
-                            </div>
-                            <div class="input-group checkbox">
-                                <label><input type="checkbox" id="item-no-stack"> Do Not Stack / Top Only</label>
-                            </div>
-                            <div class="input-group checkbox">
-                                <label><input type="checkbox" id="item-priority"> <i class="fas fa-star"
-                                        style="color:#fbbf24;"></i> High Priority</label>
-                            </div>
-                            <div class="input-group checkbox separator-top">
-                                <label class="checkbox-label">
-                                    <input type="checkbox" id="main-deck-only">
-                                    <strong>Main Deck Only</strong>
+                            <!-- All five flags on one wrapping row. As separate grid cells
+                                 they inherited the uppercase block label style, which pushed
+                                 each checkbox onto its own line above its text. -->
+                            <div class="form-flags">
+                                <label class="flag-chip" title="Коробку можно класть на бок / поворачивать">
+                                    <input type="checkbox" id="item-tip" checked>
+                                    <i class="fas fa-rotate"></i> Allow Tipping/Rotation
                                 </label>
-                            </div>
-                            <div class="input-group checkbox">
-                                <label class="checkbox-label">
+                                <label class="flag-chip" title="Ставить только сверху, ничего не класть поверх">
+                                    <input type="checkbox" id="item-no-stack">
+                                    <i class="fas fa-layer-group"></i> Do Not Stack / Top Only
+                                </label>
+                                <label class="flag-chip" title="Грузить в первую очередь">
+                                    <input type="checkbox" id="item-priority">
+                                    <i class="fas fa-star" style="color:#fbbf24;"></i> High Priority
+                                </label>
+                                <span class="flag-sep"></span>
+                                <label class="flag-chip" title="Только верхняя палуба (паллеты)">
+                                    <input type="checkbox" id="main-deck-only">
+                                    <i class="fas fa-layer-group"></i> Main Deck Only
+                                </label>
+                                <label class="flag-chip" title="Только нижняя палуба (багажники)">
                                     <input type="checkbox" id="lower-deck-only">
-                                    <strong>Lower Deck Only</strong>
+                                    <i class="fas fa-database"></i> Lower Deck Only
                                 </label>
                             </div>
                             <div class="btn-group">
@@ -310,10 +343,10 @@
         </div>
     </div>
 
-    <script src="packer.js?v=4.3"></script>
-    <script src="ui_visualizer_main.js?v=4.3"></script>
-    <script src="ui_visualizer_3d.js?v=4.3"></script>
-    <script src="app.js?v=4.3"></script>
+    <script src="packer.js?v=4.4"></script>
+    <script src="ui_visualizer_main.js?v=4.4"></script>
+    <script src="ui_visualizer_3d.js?v=4.4"></script>
+    <script src="app.js?v=4.4"></script>
 </body>
 
 </html>

@@ -35,14 +35,7 @@ class CargoApp {
 
         // Calculate
         document.getElementById('btn-calculate').addEventListener('click', () => this.calculate());
-        // Выбор стороны свеса нужен только когда повёрнутые паллеты включены.
-        const rotChk = document.getElementById('use-rotated-pallets');
-        const ohSel = document.getElementById('overhang-mode');
-        if (rotChk && ohSel) {
-            const sync = () => { ohSel.style.display = rotChk.checked ? '' : 'none'; };
-            rotChk.addEventListener('change', sync);
-            sync();
-        }
+        this.initLoadOptions();
 
         // Paste from Excel
         const pasteBtn = document.getElementById('btn-paste-excel');
@@ -74,6 +67,56 @@ class CargoApp {
 
         // Initial render
         this.renderInventory();
+    }
+
+    // ─── Панель параметров рейса ──────────────────────────────────
+    // Все настройки собраны в выпадающую панель: в строку они занимали ~1270 px
+    // и выталкивали кнопку расчёта за правый край экрана.
+    initLoadOptions() {
+        const wrap = document.querySelector('.load-options');
+        const btn = document.getElementById('btn-load-options');
+        const panel = document.getElementById('load-options-panel');
+        const rotChk = document.getElementById('use-rotated-pallets');
+        const ohField = document.getElementById('overhang-field');
+
+        // Сторона свеса нужна только для повёрнутых паллет.
+        if (rotChk && ohField) {
+            const syncOverhang = () => { ohField.hidden = !rotChk.checked; };
+            rotChk.addEventListener('change', syncOverhang);
+            syncOverhang();
+        }
+
+        if (!wrap || !btn || !panel) return;
+
+        const setOpen = (open) => {
+            panel.hidden = !open;
+            wrap.dataset.open = open ? 'true' : 'false';
+            btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        };
+        setOpen(false);
+
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setOpen(panel.hidden);
+        });
+        // Клик внутри панели не должен её закрывать.
+        panel.addEventListener('click', (e) => e.stopPropagation());
+        document.addEventListener('click', () => setOpen(false));
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setOpen(false); });
+
+        // Подпись на кнопке показывает выбранное, чтобы не открывать панель ради проверки.
+        const summary = document.getElementById('load-options-summary');
+        const refresh = () => {
+            if (!summary) return;
+            const cfg = document.getElementById('config-select')?.value || '';
+            const parts = [cfg];
+            if (document.getElementById('use-euro-pallets')?.checked) parts.push('🪵 Евро');
+            if (rotChk?.checked) parts.push('↻ Поворот');
+            summary.textContent = parts.filter(Boolean).join(' · ') || 'Параметры';
+        };
+        ['config-select', 'aircraft-select', 'use-euro-pallets', 'use-rotated-pallets']
+            .forEach(id => document.getElementById(id)?.addEventListener('change', refresh));
+        refresh();
     }
 
     async handleExcelImport(event) {
@@ -1524,7 +1567,7 @@ class CargoApp {
     }
 }
 
-const BUILD_VERSION = '4.3';
+const BUILD_VERSION = '4.4';
 console.log(`SkyGuard Cargo Optimizer — build ${BUILD_VERSION}`);
 
 window.app = new CargoApp();
