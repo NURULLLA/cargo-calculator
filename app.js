@@ -35,6 +35,14 @@ class CargoApp {
 
         // Calculate
         document.getElementById('btn-calculate').addEventListener('click', () => this.calculate());
+        // Выбор стороны свеса нужен только когда повёрнутые паллеты включены.
+        const rotChk = document.getElementById('use-rotated-pallets');
+        const ohSel = document.getElementById('overhang-mode');
+        if (rotChk && ohSel) {
+            const sync = () => { ohSel.style.display = rotChk.checked ? '' : 'none'; };
+            rotChk.addEventListener('change', sync);
+            sync();
+        }
 
         // Paste from Excel
         const pasteBtn = document.getElementById('btn-paste-excel');
@@ -505,18 +513,31 @@ class CargoApp {
         const configCode = document.getElementById('config-select').value;
         const aircraftId = document.getElementById('aircraft-select').value;
         const euroPallets = document.getElementById('use-euro-pallets')?.checked || false;
-        const opts = { aircraftId, euroPallets };
+        const rotatedPallets = document.getElementById('use-rotated-pallets')?.checked || false;
+        const overhangMode = document.getElementById('overhang-mode')?.value || 'both';
+        const opts = { aircraftId, euroPallets, rotatedPallets, overhangMode };
         try {
             this.results = Packer.packAircraft(configCode, this.cargo, opts);
             // Calculate total flights needed for all cargo
             this.flightPlan = Packer.calculateTotalFlights(configCode, this.cargo, opts);
             // Евро-паллеты дают площадь, но забирают 15 см высоты — на высоком грузе
             // это бывает в минус. Считаем противоположный вариант, чтобы подсказать.
-            const altRes = Packer.packAircraft(configCode, this.cargo, { aircraftId, euroPallets: !euroPallets });
+            const altRes = Packer.packAircraft(configCode, this.cargo, { ...opts, euroPallets: !euroPallets });
             const loadedBoxes = (r) => r.pallets.reduce((a, p) => a + p.layers.reduce((x, l) => x + (l.count || 0), 0), 0)
                 + r.lowerDeck.reduce((a, h) => a + h.compartments.reduce((x, c) =>
                     x + c.items.reduce((y, i) => y + i.count, 0), 0), 0);
             this.euroCompare = { euroOn: euroPallets, current: loadedBoxes(this.results), alternative: loadedBoxes(altRes) };
+            // Повёрнутые паллеты: если галочка выключена, а негабарит в остатке —
+            // показываем, сколько дало бы её включение.
+            if (!rotatedPallets) {
+                const rotRes = Packer.packAircraft(configCode, this.cargo, { ...opts, rotatedPallets: true });
+                const gain = Packer.loadTally(rotRes), now = Packer.loadTally(this.results);
+                this.rotatedCompare = (rotRes.floor.rotatedCount > 0 && gain.chg > now.chg + 1)
+                    ? { boxes: gain.boxes, kg: Math.round(gain.kg), pallets: rotRes.floor.rotatedCount }
+                    : null;
+            } else {
+                this.rotatedCompare = null;
+            }
         } catch (e) {
             console.error("Packer Error:", e);
             alert("Calculation Error: " + e.message);
@@ -537,7 +558,10 @@ class CargoApp {
         // Конфиг берём из результата — он уже учитывает евро-паллеты
         const currentConfig = this.results.config || CONFIG.PALLET_OPTIONS[configCode];
         const uldTare = currentConfig.tare_weight + (currentConfig.euro_wood_weight || 0);
-        let totalGross = (currentConfig.count * uldTare) +
+        // Тара берётся из результата: повёрнутые поддоны занимают по 1,5+
+        // позиции, поэтому ULD на борту меньше, и у них своя тара с деревом.
+        const tareSum = this.results.floor?.totalTare ?? (currentConfig.count * uldTare);
+        let totalGross = tareSum +
             this.results.lowerDeck.reduce((acc, h) => acc + h.current_weight, 0);
         let totalVolume = 0;
 
@@ -568,7 +592,7 @@ class CargoApp {
 
         // Requested vs Capability
         const requestedNet = this.cargo.reduce((acc, i) => acc + (i.weight * i.count), 0);
-        const totalTare = currentConfig.count * uldTare;
+        const totalTare = tareSum;
         const maxNetCapability = maxLimit - totalTare;
 
         const isNetOverload = requestedNet > maxNetCapability;
@@ -580,8 +604,31 @@ class CargoApp {
                 Gross: ${totalGross.toLocaleString()} / ${maxLimit.toLocaleString()} kg <span style="color:var(--text-muted);font-weight:400;">(${loadPercentage}%)</span>
             </span>
             <span class="wt-net">Net loaded: ${totalW.toLocaleString()} kg &nbsp;·&nbsp; Vol: ${totalVolume.toFixed(1)} m³</span>
-            <span class="wt-net">Requested: ${requestedNet.toLocaleString()} kg &nbsp;·&nbsp; Tare: ${totalTare.toLocaleString()} kg${currentConfig.euro ? ` (вкл. дерево ${(currentConfig.count * currentConfig.euro_wood_weight).toLocaleString()} кг)` : ''}</span>
+            <span class="wt-net">Requested: ${requestedNet.toLocaleString()} kg &nbsp;·&nbsp; Tare: ${totalTare.toLocaleString()} kg${(() => {
+                const f = this.results.floor;
+                const wood = (currentConfig.euro ? (f?.normalPositions ?? currentConfig.count) * (currentConfig.euro_wood_weight || 0) : 0)
+                    + (f?.rotatedCount || 0) * (CONFIG.EURO_PALLET.pallets_per_uld * CONFIG.EURO_PALLET.weight_each_kg);
+                return wood ? ` (вкл. дерево ${wood.toLocaleString()} кг)` : '';
+            })()}</span>
             ${currentConfig.euro ? `<span class="wt-net" style="color:#a3e635;">🪵 Евро-паллеты: площадка ${currentConfig.length_cross}×${currentConfig.width_long} см, высота груза ${currentConfig.max_height} см</span>` : ''}
+            ${(() => {
+                const f = this.results.floor;
+                if (!f || !f.rotatedCount) return '';
+                const rp = this.results.pallets.filter(p => p.rotated);
+                const longest = Math.max(...rp.flatMap(p => p.layers.flatMap(l => (l.placements || []).map(x => x.l))), 0);
+                // Режим берём из самого результата, а не из селекта: иначе
+                // после переключения без пересчёта подпись врёт.
+                const mode = rp[0]?.overhangMode === 'one' ? 'в одну сторону' : 'с двух сторон';
+                return `<span class="wt-net" style="color:#60a5fa;">↻ Повёрнутых паллет: <strong>${f.rotatedCount}</strong>`
+                    + ` — занимают ${f.rotatedPositions} из ${f.totalPositions} позиций`
+                    + ` (осталось обычных: ${f.normalPositions}). Самый длинный груз ${Math.round(longest)} см, свес ${mode}.</span>`;
+            })()}
+            ${(() => {
+                const c = this.rotatedCompare;
+                if (!c) return '';
+                return `<span class="wt-net" style="color:#fbbf24;">↻ С повёрнутыми паллетами загрузилось бы <strong>${c.boxes}</strong> мест / <strong>${c.kg.toLocaleString()}</strong> кг`
+                    + ` (${c.pallets} повёрнутых поддона) — попробуйте включить галочку</span>`;
+            })()}
             ${(() => {
                 const c = this.euroCompare;
                 if (!c || c.current === c.alternative) return '';
@@ -609,7 +656,11 @@ class CargoApp {
         const ldWeight = this.results.lowerDeck.reduce((acc, h) => acc + h.current_weight, 0);
         document.getElementById('md-payload').textContent = mdWeight.toLocaleString();
         document.getElementById('ld-payload').textContent = ldWeight.toLocaleString();
-        const filledPos = this.results.pallets.filter(p => p.currentWeight > 0).length;
+        // Повёрнутый поддон занимает 1,5-3 позиции, поэтому считаем ПОЗИЦИИ,
+        // а не поддоны.
+        const filledPos = this.results.pallets
+            .filter(p => p.currentWeight > 0)
+            .reduce((a, p) => a + (p.rotated ? p.positions : 1), 0);
         const totalPos = CONFIG.PALLET_OPTIONS[configCode].count;
         document.getElementById('md-pos').textContent = `${filledPos}/${totalPos}`;
         const mdPosSummary = document.getElementById('md-pos-summary');
@@ -742,13 +793,24 @@ class CargoApp {
                             mainDeckOnly: !!i.mainDeckOnly, lowerDeckOnly: !!i.lowerDeckOnly
                         }));
                         if (!probeItems.length) return '';
-                        const probe = Packer.packAircraft(code, probeItems, { aircraftId, euroPallets: true });
-                        const n = probe.pallets.reduce((a, p) => a + p.layers.reduce((x, l) => x + (l.count || 0), 0), 0)
-                            + probe.lowerDeck.reduce((a, h) => a + h.compartments.reduce((x, c) =>
+                        const loadedIn = (r) => r.pallets.reduce((a, p) => a + p.layers.reduce((x, l) => x + (l.count || 0), 0), 0)
+                            + r.lowerDeck.reduce((a, h) => a + h.compartments.reduce((x, c) =>
                                 x + c.items.reduce((y, it) => y + it.count, 0), 0), 0);
+                        let hint = '';
+                        const probe = Packer.packAircraft(code, probeItems, { aircraftId, euroPallets: true });
+                        const n = loadedIn(probe);
                         const eu = Packer.resolveConfig(code, { euroPallets: true });
-                        return n ? `<div style="margin-top:0.5rem; padding-top:0.5rem; border-top:1px solid #f59e0b44;">
-                            🪵 Включите <strong>евро-паллеты</strong> в шапке — площадка станет ${eu.length_cross}×${eu.width_long} см, и ${n} из этих мест встанут.</div>` : '';
+                        if (n) hint += `<div style="margin-top:0.5rem; padding-top:0.5rem; border-top:1px solid #f59e0b44;">
+                            🪵 Включите <strong>евро-паллеты</strong> в шапке — площадка станет ${eu.length_cross}×${eu.width_long} см, и ${n} из этих мест встанут.</div>`;
+                        // Не спасут ли повёрнутые паллеты? Тот же приём — спрашиваем упаковщик.
+                        if (!document.getElementById('use-rotated-pallets')?.checked) {
+                            const rp = Packer.packAircraft(code, probeItems, { aircraftId, rotatedPallets: true });
+                            const m = loadedIn(rp);
+                            if (m) hint += `<div style="margin-top:0.5rem; padding-top:0.5rem; border-top:1px solid #f59e0b44;">
+                                ↻ Включите <strong>повёрнутые паллеты</strong> в шапке — ${m} из этих мест встанут со свесом
+                                (${rp.floor.rotatedCount} повёрнутых поддона, ${rp.floor.rotatedPositions} позиций).</div>`;
+                        }
+                        return hint;
                     })()}
                 </div>`;
             }
@@ -777,6 +839,7 @@ class CargoApp {
                     <div>
                         <strong style="color:var(--accent); font-size:1.1rem;">Pos ${p.id}</strong>
                         <span style="color:var(--text-muted); margin-left:8px;">${p.config.code}</span>
+                        ${p.rotated ? `<span style="margin-left:8px; padding:1px 6px; border-radius:4px; background:#60a5fa22; color:#60a5fa; font-size:0.7rem; font-weight:700;" title="Повёрнутый поддон: 317 см вдоль борта, груз свешивается за край">↻ ПОВЁРНУТ · ${p.positions} поз. · ${p.floorUsed} см пола</span>` : ''}
                     </div>
                     <div style="text-align:right;">
                         <div style="font-weight:700;">${p.currentWeight.toLocaleString()} / ${p.maxNetWeight.toLocaleString()} kg</div>
@@ -869,8 +932,11 @@ class CargoApp {
                             <span class="mf-badge mf-badge-blue">&#9878; ${pallet.currentWeight.toLocaleString()} / ${pallet.maxNetWeight.toLocaleString()} кг (${pct}%)</span>
                             <span class="mf-badge mf-badge-green">&#128230; ${totalBoxes} коробок</span>
                             <span class="mf-badge mf-badge-gray">&#128207; Высота стопки: ${Math.round(pallet.currentHeight * 10) / 10} см</span>
-                            <span class="mf-badge mf-badge-gray">Поддон: ${pallet.config.length_cross}&times;${pallet.config.width_long}&times;${pallet.config.max_height} см</span>
+                            <span class="mf-badge mf-badge-gray">Поддон: ${pallet.rotated
+                                ? `${pallet.config.width_long} вдоль &times; ${pallet.config.length_cross} поперёк &times; ${pallet.config.max_height}`
+                                : `${pallet.config.length_cross}&times;${pallet.config.width_long}&times;${pallet.config.max_height}`} см</span>
                             ${pallet.config.euro ? `<span class="mf-badge" style="background:#365314;color:#a3e635;">&#129717; Евро-паллеты: груз поднят на ${pallet.config.euro_lift} см, дерево ${pallet.woodWeight} кг</span>` : ''}
+                            ${pallet.rotated ? `<span class="mf-badge" style="background:#1e3a8a;color:#93c5fd;">&#8635; ПОВЁРНУТ: ${pallet.positions} позиций, ${pallet.floorUsed} см пола, свес ${pallet.overhangMode === 'one' ? 'в одну сторону' : 'с двух сторон'}</span>` : ''}
                         </div>
                     </div>
                     <button class="mf-close" onclick="this.closest('.mf-overlay').remove()">&times;</button>
@@ -881,7 +947,9 @@ class CargoApp {
                         <div class="mf-fuselage-line"><span class="mf-fuselage-label">ФЮЗЕЛЯЖ</span></div>
                         <span class="mf-tail">ХВОСТ &#9658;</span>
                     </div>
-                    <p class="mf-orient-hint">Поддон загружается через боковую дверь. Длинная сторона поддона идёт <strong>поперёк фюзеляжа</strong> (от борта к борту). ${pallet.config.length_cross} см &mdash; поперёк, ${pallet.config.width_long} см &mdash; вдоль.</p>
+                    <p class="mf-orient-hint">${pallet.rotated
+                        ? `Поддон <strong>ПОВЁРНУТ</strong>: длинная сторона идёт <strong>вдоль фюзеляжа</strong> (от носа к хвосту). ${pallet.config.width_long} см &mdash; вдоль (опора), ${pallet.config.length_cross} см &mdash; поперёк. Груз длиннее ${pallet.config.width_long} см свешивается за край ${pallet.overhangMode === 'one' ? 'в одну сторону' : 'симметрично с двух сторон'} &mdash; под свесом соседнюю позицию не занимать.`
+                        : `Поддон загружается через боковую дверь. Длинная сторона поддона идёт <strong>поперёк фюзеляжа</strong> (от борта к борту). ${pallet.config.length_cross} см &mdash; поперёк, ${pallet.config.width_long} см &mdash; вдоль.`}</p>
                 </div>
                 <div class="mf-section">
                     <h3 class="mf-section-title">&#128208; Вид сбоку &mdash; все слои</h3>
@@ -954,11 +1022,30 @@ class CargoApp {
     _renderElevationSVG(pallet) {
         const W = 520, H = 200, PL = 38, PR = 12, PT = 12, PB = 28;
         const dW = W-PL-PR, dH = H-PT-PB;
-        const sX = dW / pallet.config.width_long, sY = dH / pallet.config.max_height;
+        // На повёрнутом поддоне груз выходит за опорную площадку, поэтому вид
+        // сбоку масштабируем по полной занятой длине и рисуем свес отдельно.
+        const alongSpan = pallet.rotated
+            ? Math.max(pallet.config.width_long,
+                ...pallet.layers.flatMap(l => (l.placements || []).map(p => p.l)))
+            : pallet.config.width_long;
+        const sX = dW / alongSpan, sY = dH / pallet.config.max_height;
         const C = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899'];
         let rects = '';
+        if (pallet.rotated) {
+            // Серая зона опоры поддона на фоне всей занятой длины
+            const padX = (alongSpan - pallet.config.width_long) / 2 * sX;
+            rects += `<rect x="${(PL+padX).toFixed(1)}" y="${PT+dH}" width="${(pallet.config.width_long*sX).toFixed(1)}" height="5" fill="#2563eb" rx="1"/>`;
+        }
         pallet.layers.forEach((layer, i) => {
             const col = C[i % C.length], ry = PT + dH - layer.z_end * sY, rh = layer.height * sY;
+            if (pallet.rotated && layer.placements && layer.placements.length) {
+                // Каждое место рисуем по его реальной длине — свес виден.
+                const span = Math.max(...layer.placements.map(p => p.l));
+                const x0 = PL + (alongSpan - span) / 2 * sX;
+                rects += `<rect x="${x0.toFixed(1)}" y="${ry.toFixed(1)}" width="${(span*sX).toFixed(1)}" height="${rh.toFixed(1)}" fill="${col}" opacity="0.82" rx="2"/>`;
+                if (rh > 13) rects += `<text x="${(x0+span*sX/2).toFixed(1)}" y="${(ry+rh/2+4).toFixed(1)}" text-anchor="middle" font-size="10" fill="white" font-weight="bold">Слой ${i+1}: ${layer.count} шт. &bull; ${Math.round(span)}&times;${layer.height}см</text>`;
+                return;
+            }
             rects += `<rect x="${PL}" y="${ry.toFixed(1)}" width="${dW}" height="${rh.toFixed(1)}" fill="${col}" opacity="0.82" rx="2"/>`;
             if (rh > 13) rects += `<text x="${(PL+dW/2).toFixed(1)}" y="${(ry+rh/2+4).toFixed(1)}" text-anchor="middle" font-size="10" fill="white" font-weight="bold">Слой ${i+1}: ${layer.count} шт. &bull; ${layer.height}см</text>`;
         });
@@ -971,7 +1058,7 @@ class CargoApp {
         grid += `<line x1="${PL}" y1="${PT}" x2="${W-PR}" y2="${PT}" stroke="#ef4444" stroke-width="1" stroke-dasharray="5,3" opacity="0.7"/>`;
         grid += `<text x="${W-PR}" y="${PT-2}" text-anchor="end" font-size="8" fill="#ef4444">макс ${pallet.config.max_height}см</text>`;
         grid += `<rect x="${PL}" y="${PT+dH}" width="${dW}" height="4" fill="#475569" rx="1"/>`;
-        grid += `<text x="${PL+dW/2}" y="${H-6}" text-anchor="middle" font-size="9" fill="#64748b">Вдоль фюзеляжа: ${pallet.config.width_long}см</text>`;
+        grid += `<text x="${PL+dW/2}" y="${H-6}" text-anchor="middle" font-size="9" fill="#64748b">Вдоль фюзеляжа: ${pallet.rotated && alongSpan > pallet.config.width_long ? `опора ${pallet.config.width_long}см, со свесом ${Math.round(alongSpan)}см` : `${pallet.config.width_long}см`}</text>`;
         grid += `<text x="${PL-18}" y="${PT+dH/2}" text-anchor="middle" font-size="9" fill="#64748b" transform="rotate(-90,${PL-18},${PT+dH/2})">Высота (см)</text>`;
         return `<div class="mf-svg-wrap"><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="max-width:100%">${grid}${rects}</svg></div>`;
     }
@@ -1437,7 +1524,7 @@ class CargoApp {
     }
 }
 
-const BUILD_VERSION = '4.2';
+const BUILD_VERSION = '4.3';
 console.log(`SkyGuard Cargo Optimizer — build ${BUILD_VERSION}`);
 
 window.app = new CargoApp();
