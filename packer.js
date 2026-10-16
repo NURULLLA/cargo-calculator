@@ -12,6 +12,15 @@ const TECH_KIT_WEIGHT_KG = 300;
 // through the hatch, so a single box may not exceed this weight.
 const LOWER_DECK_MAX_BOX_KG = 75;
 
+// Сколько основания коробки должно опираться на ярус снизу. Требовать все 100 %
+// слишком строго — свес на соседнюю коробку под сеткой это обычная практика, и
+// жёсткое правило теряло до 13 мест на борт. Но центр тяжести обязан быть над
+// опорой, иначе коробка опрокинется или повиснет.
+const MIN_SUPPORT_FRACTION = 0.70;
+// На столько коробка может выступать за опорную площадку при подборе места;
+// фактический процент опоры всё равно проверяется отдельно.
+const SUPPORT_OVERHANG_CM = 45;
+
 const CONFIG = {
     AIRCRAFT_NAME: "Boeing 757-200 PCF",
     MAX_FUSELAGE_HEIGHT_CM: 205,
@@ -583,6 +592,110 @@ const Packer = {
         return best;
     },
 
+    // Доля основания коробки, реально лежащая на опоре, и опёрт ли её центр.
+    supportCheck: (pos, supportRects) => {
+        const area = pos.w * pos.l;
+        if (area <= 0) return { frac: 0, centred: false };
+        let covered = 0;
+        for (const r of supportRects) {
+            const w = Math.min(pos.x + pos.w, r.x + r.w) - Math.max(pos.x, r.x);
+            const l = Math.min(pos.y + pos.l, r.y + r.l) - Math.max(pos.y, r.y);
+            if (w > 0 && l > 0) covered += w * l;
+        }
+        const cx = pos.x + pos.w / 2, cy = pos.y + pos.l / 2;
+        const centred = supportRects.some(r =>
+            cx >= r.x - 1e-6 && cx <= r.x + r.w + 1e-6 &&
+            cy >= r.y - 1e-6 && cy <= r.y + r.l + 1e-6);
+        return { frac: covered / area, centred };
+    },
+
+    // ─── ОПОРА ПОД ВЕРХНИМИ ЯРУСАМИ ──────────────────────────────────────
+    // Ярус раньше укладывался так, будто под ним сплошной пол. Это неверно:
+    // нижний ярус заполнен не полностью, и коробка могла встать над пустотой
+    // (проверка опоры показывала места с 0 % опоры — они буквально висели
+    // в воздухе). Теперь верхний ярус кладётся только на те площадки, которые
+    // реально что-то держит.
+
+    // Площадки, на которые можно ставить следующий ярус: верх коробок, которые
+    // дотягиваются до потолка яруса. Коробка ниже яруса оставляет над собой
+    // пустоту и опорой не считается.
+    tierSupportRects: (tier) => {
+        if (!tier || !tier.placements) return null;
+        const top = tier.height;
+        return tier.placements
+            .filter(p => Math.abs(p.h - top) < 2.5)
+            .map(p => ({ x: p.x, y: p.y, w: p.w, l: p.l }));
+    },
+
+    // Слияние соседних площадок в максимальные прямоугольники — иначе коробка
+    // не сможет встать сразу на две стоящие рядом коробки снизу.
+    mergeSupportRects: (rects, bounds) => {
+        if (!rects || !rects.length) return [];
+
+        const addAxis = (set, lo, hi) => { set.add(lo); set.add(hi); };
+        const xs = new Set(), ys = new Set();
+        addAxis(xs, bounds.x, bounds.x + bounds.w);
+        addAxis(ys, bounds.y, bounds.y + bounds.l);
+        for (const r of rects) { addAxis(xs, r.x, r.x + r.w); addAxis(ys, r.y, r.y + r.l); }
+
+        const clip = (set, lo, hi) => Array.from(set)
+            .filter(v => v >= lo - 1e-6 && v <= hi + 1e-6)
+            .sort((a, b) => a - b)
+            .filter((v, i, a) => i === 0 || v - a[i - 1] > 1e-6);
+        const X = clip(xs, bounds.x, bounds.x + bounds.w);
+        const Y = clip(ys, bounds.y, bounds.y + bounds.l);
+        const nx = X.length - 1, ny = Y.length - 1;
+        if (nx < 1 || ny < 1) return [];
+        // На очень дробной сетке слияние не окупается — берём площадки как есть.
+        if (nx * ny > 900) return rects.slice();
+
+        const cov = [];
+        for (let i = 0; i < nx; i++) {
+            cov.push([]);
+            const cx = (X[i] + X[i + 1]) / 2;
+            for (let j = 0; j < ny; j++) {
+                const cy = (Y[j] + Y[j + 1]) / 2;
+                cov[i].push(rects.some(r =>
+                    cx > r.x && cx < r.x + r.w && cy > r.y && cy < r.y + r.l));
+            }
+        }
+
+        const out = [];
+        // Проход 1: растём вправо, потом вниз. Проход 2: наоборот. Вместе они
+        // дают все прямоугольники, которые нужны на практике.
+        for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
+            if (!cov[i][j]) continue;
+            let i2 = i; while (i2 + 1 < nx && cov[i2 + 1][j]) i2++;
+            let j2 = j;
+            grow: while (j2 + 1 < ny) {
+                for (let k = i; k <= i2; k++) if (!cov[k][j2 + 1]) break grow;
+                j2++;
+            }
+            out.push({ x: X[i], y: Y[j], w: X[i2 + 1] - X[i], l: Y[j2 + 1] - Y[j] });
+
+            let jj = j; while (jj + 1 < ny && cov[i][jj + 1]) jj++;
+            let ii = i;
+            grow2: while (ii + 1 < nx) {
+                for (let k = j; k <= jj; k++) if (!cov[ii + 1][k]) break grow2;
+                ii++;
+            }
+            out.push({ x: X[i], y: Y[j], w: X[ii + 1] - X[i], l: Y[jj + 1] - Y[j] });
+        }
+
+        const kept = [];
+        for (let i = 0; i < out.length; i++) {
+            if (out[i].w < 0.5 || out[i].l < 0.5) continue;
+            let redundant = false;
+            for (let j = 0; j < out.length; j++) {
+                if (i === j) continue;
+                if (Packer.rectContains(out[i], out[j]) &&
+                    (!Packer.rectContains(out[j], out[i]) || j < i)) { redundant = true; break; }
+            }
+            if (!redundant) kept.push(out[i]);
+        }
+        return kept;
+    },
+
     /**
      * Fills ONE tier of a container with a mix of box types.
      *
@@ -593,7 +706,7 @@ const Packer = {
      * @param {boolean} seedGrid  start from the optimal grid of the largest box type
      * @returns {Object|null} { placements, placedWeight, placedVolume, height, availCross }
      */
-    fillTier: (container, tierHeight, candidates, caps, seedGrid) => {
+    fillTier: (container, tierHeight, candidates, caps, seedGrid, supportRects, supportRaw) => {
         const topZ = container.currentHeight + tierHeight;
         if (topZ > container.maxHeight + 0.001) return null;
 
@@ -622,12 +735,42 @@ const Packer = {
 
         if (!entries.length) return null;
 
-        let free = [{ x: 0, y: 0, w: availCross, l: availLong }];
-        const placements = [];
-        let placedWeight = 0, placedVolume = 0;
-
         // Cargo is centred across the container, so any taper stays symmetric.
         const crossOffset = (Packer.containerWidthAt(container, 0) - availCross) / 2;
+
+        // Пол первого яруса — вся площадка. Выше класть можно только туда, где
+        // под коробкой действительно что-то стоит, иначе она повиснет в воздухе.
+        // Опора в координатах этого яруса (сужение фюзеляжа сдвигает начало).
+        // Для подбора места берутся СЛИТЫЕ площадки, а для измерения доли опоры —
+        // исходные: слитые максимальные прямоугольники перекрываются, и сумма
+        // их пересечений с коробкой считала бы опору дважды.
+        const localSupport = supportRects
+            ? supportRects.map(r => ({ x: r.x - crossOffset, y: r.y, w: r.w, l: r.l }))
+            : null;
+        const localRaw = supportRaw
+            ? supportRaw.map(r => ({ x: r.x - crossOffset, y: r.y, w: r.w, l: r.l }))
+            : localSupport;
+
+        let free;
+        if (localSupport) {
+            // Площадки расширены на допустимый свес: коробка может чуть выступать
+            // за опору, но доля опоры и положение центра проверяются в admit().
+            const M = SUPPORT_OVERHANG_CM;
+            free = localSupport
+                .map(r => {
+                    const x0 = Math.max(0, r.x - M), y0 = Math.max(0, r.y - M);
+                    const x1 = Math.min(availCross, r.x + r.w + M);
+                    const y1 = Math.min(availLong, r.y + r.l + M);
+                    return { x: x0, y: y0, w: x1 - x0, l: y1 - y0 };
+                })
+                .filter(r => r.w > 0.5 && r.l > 0.5);
+            if (!free.length) return null;
+        } else {
+            free = [{ x: 0, y: 0, w: availCross, l: availLong }];
+        }
+
+        const placements = [];
+        let placedWeight = 0, placedVolume = 0;
 
         // Stock is shared between entries of the same item (one entry per
         // variant), so track consumption per item as well as per entry.
@@ -637,6 +780,12 @@ const Packer = {
             const unitVolume = (e.variant.l * e.variant.w * e.variant.h) / 1000000;
             const alreadyUsed = usedPerItem.get(e.item) || 0;
             if (e.item.count - alreadyUsed <= 0) return false;
+
+            // Выше первого яруса коробка должна реально на чём-то стоять.
+            if (localRaw) {
+                const s = Packer.supportCheck(pos, localRaw);
+                if (!s.centred || s.frac < MIN_SUPPORT_FRACTION) return false;
+            }
             if (placedWeight + e.variant.weight > caps.weightRemaining + 0.001) return false;
             if (placedWeight + e.variant.weight > caps.grossRemaining + 0.001) return false;
             if (caps.volumeRemaining !== undefined &&
@@ -664,9 +813,15 @@ const Packer = {
         // remaining gaps are filled incrementally below.
         if (seedGrid) {
             const e = entries[0];
-            const fps = e.footprints.filter(fp => fp.w <= availCross && fp.l <= availLong);
-            if (fps.length) {
-                const layout = Packer.gridLayout(availCross, availLong, fps[0], fps[1] || fps[0]);
+            // На верхних ярусах сетку раскладываем внутри опорной площадки,
+            // а не по всему полу — иначе её коробки встанут над пустотой.
+            const base = supportRects
+                ? free.slice().sort((a, b) => (b.w * b.l) - (a.w * a.l))[0]
+                : { x: 0, y: 0, w: availCross, l: availLong };
+            const fps = e.footprints.filter(fp => fp.w <= base.w && fp.l <= base.l);
+            if (base && fps.length) {
+                const layout = Packer.gridLayout(base.w, base.l, fps[0], fps[1] || fps[0])
+                    .map(p => ({ ...p, x: p.x + base.x, y: p.y + base.y }));
                 for (const pos of layout) if (!admit(e, pos)) break;
             }
         }
@@ -706,9 +861,24 @@ const Packer = {
      *
      * @param {Function} variantFilter optional (item, variant) => boolean
      */
-    buildBestTier: (container, items, caps, variantFilter) => {
+    buildBestTier: (container, items, caps, variantFilter, prevTier) => {
         const headroom = container.maxHeight - container.currentHeight;
         if (headroom <= 0) return null;
+
+        // Опора под этот ярус: верх коробок предыдущего яруса, слитый в
+        // максимальные прямоугольники (чтобы коробка могла встать сразу на две
+        // соседние). Для первого яруса опора — весь пол.
+        let supportRects = null, supportRaw = null;
+        if (prevTier) {
+            supportRaw = Packer.tierSupportRects(prevTier);
+            if (!supportRaw || !supportRaw.length) return null;   // ставить не на что
+            supportRects = Packer.mergeSupportRects(supportRaw, {
+                x: 0, y: 0,
+                w: Packer.containerWidthAt(container, 0),
+                l: container.longLength
+            });
+            if (!supportRects.length) return null;
+        }
 
         const candidates = [];
         const heightSet = new Set();
@@ -755,7 +925,7 @@ const Packer = {
                 // Grid-seeded and free-form fills win in different situations
                 // (uniform vs. mixed cargo), so try both and keep the fuller tier.
                 for (const seedGrid of [true, false]) {
-                    const tier = Packer.fillTier(container, h, pool, caps, seedGrid);
+                    const tier = Packer.fillTier(container, h, pool, caps, seedGrid, supportRects, supportRaw);
                     if (!tier) continue;
                     const score = tier.placedVolume / h;   // m³ gained per cm of height
                     if (score > bestScore) { bestScore = score; best = tier; }
@@ -789,7 +959,7 @@ const Packer = {
     //        'one'  — груз прижат к одному краю, свешивается в одну сторону.
     //  На занятую длину пола режим не влияет, только на геометрию.
     // ─────────────────────────────────────────────────────────────────────
-    fillRotatedTier: (pallet, tierHeight, candidates, caps) => {
+    fillRotatedTier: (pallet, tierHeight, candidates, caps, supportRaw) => {
         const cfg = pallet.config;
         const topZ = pallet.currentHeight + tierHeight;
         if (topZ > cfg.max_height + 0.001) return null;
@@ -863,14 +1033,37 @@ const Packer = {
                 : (supported - p.l) / 2;       // по центру, свес с двух сторон
         }
 
-        return { placements, placedWeight, placedVolume, height: tierHeight, availCross, maxAlong };
+        // Выше первого яруса полоса должна лежать на полосах снизу. Обычно они
+        // совпадают сами (лента всегда сплошная и по центру), но верхний ярус
+        // может оказаться шире нижнего — тогда края повиснут.
+        let kept = placements;
+        if (supportRaw && supportRaw.length) {
+            kept = placements.filter(p => {
+                const s = Packer.supportCheck(p, supportRaw);
+                return s.centred && s.frac >= MIN_SUPPORT_FRACTION;
+            });
+            if (!kept.length) return null;
+            if (kept.length !== placements.length) {
+                placedWeight = kept.reduce((a, p) => a + p.weight, 0);
+                placedVolume = kept.reduce((a, p) => a + (p.l * p.w * p.h) / 1000000, 0);
+            }
+        }
+
+        return {
+            placements: kept, placedWeight, placedVolume,
+            height: tierHeight, availCross,
+            maxAlong: kept.reduce((m, p) => Math.max(m, p.l), 0)
+        };
     },
 
     // Подбирает высоту яруса повёрнутого паллета по тому же принципу, что и
     // buildBestTier: максимум объёма на сантиметр высоты стопки.
-    buildBestRotatedTier: (pallet, items, caps) => {
+    buildBestRotatedTier: (pallet, items, caps, prevTier) => {
         const headroom = pallet.config.max_height - pallet.currentHeight;
         if (headroom <= 0) return null;
+
+        const supportRaw = prevTier ? Packer.tierSupportRects(prevTier) : null;
+        if (prevTier && (!supportRaw || !supportRaw.length)) return null;
 
         const candidates = [];
         const heightSet = new Set();
@@ -887,7 +1080,7 @@ const Packer = {
 
         let best = null, bestScore = -1;
         for (const h of Array.from(heightSet).sort((a, b) => b - a)) {
-            const tier = Packer.fillRotatedTier(pallet, h, candidates, caps);
+            const tier = Packer.fillRotatedTier(pallet, h, candidates, caps, supportRaw);
             if (!tier) continue;
             const score = tier.placedVolume / h;
             if (score > bestScore) { bestScore = score; best = tier; }
@@ -1049,7 +1242,8 @@ const Packer = {
                     };
                     if (caps.weightRemaining <= 0 || caps.grossRemaining <= 0) break;
 
-                    const tier = Packer.buildBestRotatedTier(p, oversize, caps);
+                    const tier = Packer.buildBestRotatedTier(p, oversize, caps,
+                        p.layers.length ? p.layers[p.layers.length - 1] : null);
                     if (!tier) break;
 
                     let closePallet = false;
@@ -1167,9 +1361,11 @@ const Packer = {
                     };
                     if (caps.weightRemaining <= 0 || caps.grossRemaining <= 0) break;
 
-                    // Only boxes that clear the main cargo door
+                    // Only boxes that clear the main cargo door. Выше первого яруса
+                    // класть можно только на опору предыдущего — см. buildBestTier.
                     const tier = Packer.buildBestTier(container, targetItems, caps,
-                        (item) => Packer.fitsThroughDoor(item, CONFIG.DOOR_MAIN));
+                        (item) => Packer.fitsThroughDoor(item, CONFIG.DOOR_MAIN),
+                        p.layers.length ? p.layers[p.layers.length - 1] : null);
                     if (!tier) break;
 
                     // Commit: consume stock, weight and stack height
@@ -1290,7 +1486,8 @@ const Packer = {
                         if (caps.weightRemaining <= 0 || caps.grossRemaining <= 0 || caps.volumeRemaining <= 0) break;
 
                         const tier = Packer.buildBestTier(container, targetItems, caps,
-                            (item) => passesHatch(item, hold) && item.weight <= LOWER_DECK_MAX_BOX_KG);
+                            (item) => passesHatch(item, hold) && item.weight <= LOWER_DECK_MAX_BOX_KG,
+                            compData.tiers.length ? compData.tiers[compData.tiers.length - 1] : null);
                         if (!tier) break;
 
                         for (const pl of tier.placements) pl.item.count -= 1;
@@ -1446,5 +1643,5 @@ const Packer = {
 
 // export { Packer, CONFIG };
 if (typeof module !== 'undefined') {
-    module.exports = { Packer, CONFIG, LOWER_DECK_MAX_BOX_KG };
+    module.exports = { Packer, CONFIG, LOWER_DECK_MAX_BOX_KG, MIN_SUPPORT_FRACTION };
 }
