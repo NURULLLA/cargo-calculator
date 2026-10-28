@@ -1115,6 +1115,25 @@ const Packer = {
     },
 
     packAircraft: (configCode, cargoItems, options = {}) => {
+        // ── ЕВРО-ПАЛЛЕТЫ «АВТО»: часть позиций на евро-паллетах, часть на обычных ──
+        // Перебираем, сколько позиций ставить на евро-паллеты (0..N), и берём
+        // вариант с наибольшим весом загруженного груза (приоритет — вес),
+        // затем больше мест, затем меньше евро-паллет (меньше дерева).
+        if (options.euroAuto && options._euroK === undefined) {
+            const N = CONFIG.PALLET_OPTIONS[configCode].count;
+            let bestRes = null, bestS = null;
+            for (let k = 0; k <= N; k++) {
+                const r = Packer.packAircraft(configCode, cargoItems,
+                    { ...options, euroPallets: false, _euroK: k });
+                const s = Packer.loadTally(r);
+                const e = r.floor.euroCount || 0;
+                const better = !bestS || s.kg > bestS.kg + 1e-6 ||
+                    (Math.abs(s.kg - bestS.kg) <= 1e-6 && (s.boxes > bestS.boxes ||
+                     (s.boxes === bestS.boxes && e < bestS.e)));
+                if (better) { bestS = { ...s, e }; bestRes = r; }
+            }
+            return bestRes;
+        }
         // ── СКОЛЬКО ПОВЁРНУТЫХ ПАЛЛЕТ СТАВИТЬ ───────────────────────────
         // Повёрнутый паллет съедает 1,5-3 позиции, поэтому «поставить все,
         // какие можно» нередко выбрасывает с борта тонны обычного груза.
@@ -1183,7 +1202,7 @@ const Packer = {
         let groupedItemsMap = new Map();
         for (let i of cargoItems) {
             if (i.count <= 0) continue;
-            let key = `${i.length}_${i.width}_${i.height}_${i.weight}_${i.priority || false}_${i.noStack || false}_${i.allowTipping || false}_${i.mainDeckOnly || false}_${i.lowerDeckOnly || false}`;
+            let key = `${i.length}_${i.width}_${i.height}_${i.weight}_${i.priority || false}_${i.noStack || false}_${i.allowTipping || false}_${i.mainDeckOnly || false}_${i.lowerDeckOnly || false}_${i.mode || 'AUTO'}`;
             if (groupedItemsMap.has(key)) {
                 groupedItemsMap.get(key).count += i.count;
             } else {
@@ -1194,7 +1213,9 @@ const Packer = {
         let workingItems = Array.from(groupedItemsMap.values()).map(i => {
             const item = new CargoItem(i.id, i.name, i.length, i.width, i.height, i.weight, i.count, i.allowTipping, i.noStack);
             item.priority = i.priority || false;
-            item.mainDeckOnly = i.mainDeckOnly || false;
+            item.mode = i.mode || 'AUTO';   // AUTO | STD | EURO | ROT
+            // Евро-паллеты и повёрнутые — это схемы главной палубы
+            item.mainDeckOnly = (i.mainDeckOnly || item.mode === 'EURO' || item.mode === 'ROT') || false;
             item.lowerDeckOnly = i.lowerDeckOnly || false;
             return item;
         });
@@ -1205,12 +1226,16 @@ const Packer = {
         // галочки не может ухудшить план: она только добавляет то, что иначе
         // осталось бы в остатке.
         if (rotCfg) {
+            const euroProbe = options._euroK > 0 ? Packer.resolveConfig(configCode, { euroPallets: true }) : null;
             const oversize = workingItems.filter(i =>
                 i.count > 0 &&
                 !i.lowerDeckOnly &&
+                i.mode !== 'STD' && i.mode !== 'EURO' &&
                 Packer.fitsThroughDoor(i, CONFIG.DOOR_MAIN) &&
-                !Packer.fitsNormalPallet(i, config) &&
-                Packer.fitsRotatedPallet(i, rotCfg));
+                Packer.fitsRotatedPallet(i, rotCfg) &&
+                (i.mode === 'ROT' ||
+                 (!Packer.fitsNormalPallet(i, config) &&
+                  !(euroProbe && Packer.fitsNormalPallet(i, euroProbe)))));
 
             // Тару на этом этапе резервируем по максимуму позиций — это
             // консервативно; точное число ULD известно только после прохода.
@@ -1320,8 +1345,19 @@ const Packer = {
         // осталось после повёрнутых.
         const normalCount = Math.max(0, Math.floor((totalFloor - floorUsed) / pitch));
         let pallets = [];
+        // Смесь: первые k позиций (от середины борта к краям) — на евро-паллетах
+        const euroSet = new Set();
+        let euroCfgMix = null;
+        if (options._euroK > 0) {
+            euroCfgMix = Packer.resolveConfig(configCode, { euroPallets: true });
+            const mid = (normalCount + 1) / 2;
+            Array.from({ length: normalCount }, (_, x) => x + 1)
+                .sort((a, b) => Math.abs(a - mid) - Math.abs(b - mid) || a - b)
+                .slice(0, options._euroK)
+                .forEach(id => euroSet.add(id));
+        }
         for (let i = 1; i <= normalCount; i++) {
-            pallets.push(new Pallet(i, config));
+            pallets.push(new Pallet(i, euroSet.has(i) ? euroCfgMix : config));
         }
         // Повёрнутые идут в конец списка: на их опорную площадку (301×209)
         // обычные проходы могут доложить груз сверху стандартным способом.
@@ -1332,13 +1368,24 @@ const Packer = {
         // У повёрнутых своя тара — под ними дерево есть всегда.
         const uldTare = config.tare_weight + (config.euro_wood_weight || 0);
         const rotTare = rotCfg ? rotCfg.tare_weight + (rotCfg.euro_wood_weight || 0) : 0;
-        const totalTare = normalCount * uldTare + rotatedPallets.length * rotTare;
+        const totalTare = pallets.filter(p => !p.rotated).reduce((a, p) => a + p.tareWeight + p.woodWeight, 0)
+            + rotatedPallets.length * rotTare;
         currentTotalGross = totalTare
             + rotatedPallets.reduce((a, p) => a + p.currentWeight, 0);
 
         const packToPallets = (targetItems) => {
             sortForMain(targetItems);
             for (let p of pallets) {
+                // Схема груза: STD — обычная позиция, EURO — евро-паллет,
+                // ROT — повёрнутый паллет, AUTO — любая.
+                const modeOK = (it) => {
+                    const m = it.mode || 'AUTO';
+                    if (m === 'ROT') return !!p.rotated;
+                    if (m === 'EURO') return !p.rotated && !!p.config.euro;
+                    if (m === 'STD') return !p.rotated && !p.config.euro;
+                    return true;
+                };
+                const elig = targetItems.filter(modeOK);
                 // A pallet is a container whose usable width shrinks with height
                 // because of the fuselage taper.
                 const container = {
@@ -1350,7 +1397,7 @@ const Packer = {
                 };
 
                 while (true) {
-                    if (targetItems.every(x => x.count === 0)) break;
+                    if (elig.every(x => x.count === 0)) break;
                     if (currentTotalGross >= maxGrossLimit) break;
                     if (p.currentHeight >= p.config.max_height) break;
 
@@ -1363,7 +1410,7 @@ const Packer = {
 
                     // Only boxes that clear the main cargo door. Выше первого яруса
                     // класть можно только на опору предыдущего — см. buildBestTier.
-                    const tier = Packer.buildBestTier(container, targetItems, caps,
+                    const tier = Packer.buildBestTier(container, elig, caps,
                         (item) => Packer.fitsThroughDoor(item, CONFIG.DOOR_MAIN),
                         p.layers.length ? p.layers[p.layers.length - 1] : null);
                     if (!tier) break;
@@ -1557,6 +1604,7 @@ const Packer = {
                 normalPositions: normalCount,
                 rotatedPositions: rotatedPallets.reduce((a, p) => a + p.positions, 0),
                 rotatedCount: rotatedPallets.length,
+                euroCount: pallets.filter(p => !p.rotated && p.config.euro).length,
                 uldCount: pallets.length,
                 uldTare,
                 rotTare,
@@ -1614,7 +1662,7 @@ const Packer = {
                     name: i.name, count: i.count,
                     length: i.length, width: i.width, height: i.height, weight: i.weight,
                     allowTipping: i.allowTipping, noStack: i.noStack, priority: i.priority,
-                    mainDeckOnly: i.mainDeckOnly, lowerDeckOnly: i.lowerDeckOnly
+                    mainDeckOnly: i.mainDeckOnly, lowerDeckOnly: i.lowerDeckOnly, mode: i.mode
                 }))
             });
 

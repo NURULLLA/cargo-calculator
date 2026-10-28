@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
-    <link rel="stylesheet" href="styles.css?v=4.5">
+    <link rel="stylesheet" href="styles.css?v=4.6">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/three@0.145.0/build/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.145.0/examples/js/controls/OrbitControls.js"></script>
@@ -44,7 +44,7 @@
                 </button>
             </nav>
             <div class="sidebar-footer">
-                <p>build <strong id="build-version">4.5</strong></p>
+                <p>build <strong id="build-version">4.6</strong></p>
                 <p class="build-note" id="build-date">2026-10-16</p>
             </div>
         </aside>
@@ -89,6 +89,11 @@
                             </div>
 
                             <div class="load-options-sep"></div>
+
+                            <label id="euro-auto-toggle" class="load-options-check" title="Программа сама решает, какие позиции поставить на евро-паллеты, а какие на обычные, и берёт вариант с максимальным весом загруженного груза. Для любой строки схему можно закрепить вручную кнопкой в списке груза.">
+                                <input type="checkbox" id="use-euro-auto" checked>
+                                <span><strong>🪵 Евро: авто-смесь</strong><small>Часть позиций на евро-паллетах, часть на обычных — выбирает программа (приоритет — вес)</small></span>
+                            </label>
 
                             <label id="euro-toggle" class="load-options-check" title="Деревянные евро-паллеты на базе ULD: груз поднимается на 15 см и может свешиваться на всю базу поддона (PAG 317×223, PMC 317×243). Высота груза 190 см, +100 кг дерева на позицию.">
                                 <input type="checkbox" id="use-euro-pallets">
@@ -343,10 +348,10 @@
         </div>
     </div>
 
-    <script src="packer.js?v=4.5"></script>
-    <script src="ui_visualizer_main.js?v=4.5"></script>
-    <script src="ui_visualizer_3d.js?v=4.5"></script>
-    <script src="app.js?v=4.5"></script>
+    <script src="packer.js?v=4.6"></script>
+    <script src="ui_visualizer_main.js?v=4.6"></script>
+    <script src="ui_visualizer_3d.js?v=4.6"></script>
+    <script src="app.js?v=4.6"></script>
 </body>
 
 </html>

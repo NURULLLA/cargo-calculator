@@ -110,11 +110,12 @@ class CargoApp {
             if (!summary) return;
             const cfg = document.getElementById('config-select')?.value || '';
             const parts = [cfg];
-            if (document.getElementById('use-euro-pallets')?.checked) parts.push('🪵 Евро');
+            if (document.getElementById('use-euro-auto')?.checked) parts.push('🪵 Евро авто');
+            else if (document.getElementById('use-euro-pallets')?.checked) parts.push('🪵 Евро');
             if (rotChk?.checked) parts.push('↻ Поворот');
             summary.textContent = parts.filter(Boolean).join(' · ') || 'Параметры';
         };
-        ['config-select', 'aircraft-select', 'use-euro-pallets', 'use-rotated-pallets']
+        ['config-select', 'aircraft-select', 'use-euro-auto', 'use-euro-pallets', 'use-rotated-pallets']
             .forEach(id => document.getElementById(id)?.addEventListener('change', refresh));
         refresh();
     }
@@ -389,6 +390,28 @@ class CargoApp {
         this.renderInventory();
     }
 
+    // Схема размещения строки: AUTO | STD | EURO | ROT (по кругу)
+    setItemMode(id) {
+        const item = this.cargo.find(c => c.id === id);
+        if (!item) return;
+        const order = ['AUTO', 'STD', 'EURO', 'ROT'];
+        const cur = item.mode || 'AUTO';
+        item.mode = order[(order.indexOf(cur) + 1) % order.length];
+        this.renderInventory();
+    }
+
+    _modeBtn(item) {
+        const m = item.mode || 'AUTO';
+        const info = {
+            AUTO: ['Схема: AUTO', '#374151', 'Программа сама выберет: обычная позиция, евро-паллет или повёрнутый паллет'],
+            STD:  ['Обычная', '#0369a1', 'Только на обычных позициях (без евро-паллет)'],
+            EURO: ['🪵 Евро', '#4d7c0f', 'Только на евро-паллетах'],
+            ROT:  ['↻ Повёрнутый', '#1d4ed8', 'Только на повёрнутом паллете (негабарит вдоль борта)']
+        }[m];
+        return `<button class="row-chip mode-toggle-btn" data-id="${item.id}" title="${info[2]} — нажмите чтобы сменить схему"
+            style="background:${info[1]};color:#fff;border-color:${info[1]};">${info[0]}</button>`;
+    }
+
     // ─── Bulk controls: with a 90-row manifest, per-row clicking is unusable ──
     setAllTipping(allow) {
         if (!this.cargo.length) return;
@@ -461,6 +484,7 @@ class CargoApp {
                                 style="${item.allowTipping ? 'background:#10b981;color:#fff;border-color:#10b981;' : 'background:#6b7280;color:#fff;border-color:#6b7280;'}">
                                 <i class="fas ${item.allowTipping ? 'fa-rotate' : 'fa-up-long'}"></i> ${item.allowTipping ? 'Tip OK' : 'No Tip'}
                             </button>
+                            ${this._modeBtn(item)}
                             ${this._deckBtn(item, 'MAIN', 'MAIN deck', 'fa-layer-group', '#0ea5e9')}
                             ${this._deckBtn(item, 'LOWER', 'LOWER deck', 'fa-database', '#8b5cf6')}
                             ${this.deckOf(item) === 'ANY' ? '<span class="row-chip chip-static chip-auto" title="Программа сама выберет палубу">AUTO</span>' : ''}
@@ -479,6 +503,7 @@ class CargoApp {
             tr.querySelector('.btn-danger').addEventListener('click', () => this.removeCargoItem(item.id));
             tr.querySelector('.tip-toggle-btn').addEventListener('click', () => this.toggleItemTipping(item.id));
             tr.querySelector('.stack-toggle-btn').addEventListener('click', () => this.toggleItemNoStack(item.id));
+            tr.querySelector('.mode-toggle-btn').addEventListener('click', () => this.setItemMode(item.id));
             tr.querySelectorAll('.deck-chip').forEach(btn => {
                 btn.addEventListener('click', () => this.setItemDeck(item.id, btn.dataset.deck));
             });
@@ -556,20 +581,23 @@ class CargoApp {
         const configCode = document.getElementById('config-select').value;
         const aircraftId = document.getElementById('aircraft-select').value;
         const euroPallets = document.getElementById('use-euro-pallets')?.checked || false;
-        const rotatedPallets = document.getElementById('use-rotated-pallets')?.checked || false;
+        const euroAuto = document.getElementById('use-euro-auto')?.checked || false;
+        // Строка с закреплённой схемой «Повёрнутый» сама включает повёрнутые паллеты
+        const anyRotRow = this.cargo.some(i => i.mode === 'ROT');
+        const rotatedPallets = (document.getElementById('use-rotated-pallets')?.checked || false) || anyRotRow;
         const overhangMode = document.getElementById('overhang-mode')?.value || 'both';
-        const opts = { aircraftId, euroPallets, rotatedPallets, overhangMode };
+        const opts = { aircraftId, euroPallets: euroAuto ? false : euroPallets, euroAuto, rotatedPallets, overhangMode };
         try {
             this.results = Packer.packAircraft(configCode, this.cargo, opts);
             // Calculate total flights needed for all cargo
             this.flightPlan = Packer.calculateTotalFlights(configCode, this.cargo, opts);
             // Евро-паллеты дают площадь, но забирают 15 см высоты — на высоком грузе
             // это бывает в минус. Считаем противоположный вариант, чтобы подсказать.
-            const altRes = Packer.packAircraft(configCode, this.cargo, { ...opts, euroPallets: !euroPallets });
+            const altRes = Packer.packAircraft(configCode, this.cargo, { ...opts, euroAuto: false, euroPallets: !euroPallets });
             const loadedBoxes = (r) => r.pallets.reduce((a, p) => a + p.layers.reduce((x, l) => x + (l.count || 0), 0), 0)
                 + r.lowerDeck.reduce((a, h) => a + h.compartments.reduce((x, c) =>
                     x + c.items.reduce((y, i) => y + i.count, 0), 0), 0);
-            this.euroCompare = { euroOn: euroPallets, current: loadedBoxes(this.results), alternative: loadedBoxes(altRes) };
+            this.euroCompare = euroAuto ? null : { euroOn: euroPallets, current: loadedBoxes(this.results), alternative: loadedBoxes(altRes) };
             // Повёрнутые паллеты: если галочка выключена, а негабарит в остатке —
             // показываем, сколько дало бы её включение.
             if (!rotatedPallets) {
@@ -649,10 +677,11 @@ class CargoApp {
             <span class="wt-net">Net loaded: ${totalW.toLocaleString()} kg &nbsp;·&nbsp; Vol: ${totalVolume.toFixed(1)} m³</span>
             <span class="wt-net">Requested: ${requestedNet.toLocaleString()} kg &nbsp;·&nbsp; Tare: ${totalTare.toLocaleString()} kg${(() => {
                 const f = this.results.floor;
-                const wood = (currentConfig.euro ? (f?.normalPositions ?? currentConfig.count) * (currentConfig.euro_wood_weight || 0) : 0)
+                const wood = (currentConfig.euro ? (f?.normalPositions ?? currentConfig.count) * (currentConfig.euro_wood_weight || 0) : (f?.euroCount || 0) * (CONFIG.EURO_PALLET.pallets_per_uld * CONFIG.EURO_PALLET.weight_each_kg))
                     + (f?.rotatedCount || 0) * (CONFIG.EURO_PALLET.pallets_per_uld * CONFIG.EURO_PALLET.weight_each_kg);
                 return wood ? ` (вкл. дерево ${wood.toLocaleString()} кг)` : '';
             })()}</span>
+            ${(!currentConfig.euro && this.results.floor?.euroCount) ? `<span class="wt-net" style="color:#a3e635;">🪵 Евро-паллеты: <strong>${this.results.floor.euroCount}</strong> из ${this.results.floor.normalPositions} обычных позиций (остальные — без евро)</span>` : ''}
             ${currentConfig.euro ? `<span class="wt-net" style="color:#a3e635;">🪵 Евро-паллеты: площадка ${currentConfig.length_cross}×${currentConfig.width_long} см, высота груза ${currentConfig.max_height} см</span>` : ''}
             ${(() => {
                 const f = this.results.floor;
@@ -826,7 +855,7 @@ class CargoApp {
                         // Не спасут ли евро-паллеты? (только если они сейчас выключены)
                         // Спрашиваем сам упаковщик на пустом борту — он учитывает обвод
                         // фюзеляжа, а простая проверка «влезает в прямоугольник» — нет.
-                        if (document.getElementById('use-euro-pallets')?.checked) return '';
+                        if (document.getElementById('use-euro-pallets')?.checked || document.getElementById('use-euro-auto')?.checked) return '';
                         const code = document.getElementById('config-select').value;
                         const aircraftId = document.getElementById('aircraft-select').value;
                         const probeItems = stuck.filter(i => typeof i.length === 'number').map((i, k) => ({
@@ -1567,7 +1596,7 @@ class CargoApp {
     }
 }
 
-const BUILD_VERSION = '4.5';
+const BUILD_VERSION = '4.6';
 console.log(`SkyGuard Cargo Optimizer — build ${BUILD_VERSION}`);
 
 window.app = new CargoApp();
